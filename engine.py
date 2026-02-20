@@ -363,12 +363,58 @@ def xray_bones(img):
     out[:, :, 2] = np.clip(inv * 0.90, 0, 255).astype(np.uint8)
     return out
 
+def xray_reveal(img):
+    # 1. The Red channel penetrates thin dark materials best
+    b, g, r = cv2.split(img)
+    
+    # 2. Aggressive Gamma Lift (Lifts the absolute darkest, "hidden" pixels into visibility)
+    r_float = r.astype(np.float64) / 255.0
+    lifted = np.power(r_float, 0.35) * 255.0  # 0.35 is a massive shadow stretch
+    
+    # 3. Extreme Local Contrast (CLAHE)
+    # clipLimit=5.0 is incredibly high, designed to pull texture out of "black" areas
+    clahe = cv2.createCLAHE(clipLimit=5.0, tileGridSize=(8, 8))
+    texture = clahe.apply(lifted.astype(np.uint8))
+    
+    # 4. High-Pass Edge Extraction to define shapes hidden in the dark
+    blur = cv2.GaussianBlur(texture, (0, 0), 3.0)
+    high_pass = cv2.subtract(texture, blur)
+    sharp = cv2.addWeighted(texture, 1.2, high_pass, 1.8, 0)
+    
+    # 5. Apply a high-contrast color map (BONE gives that classic security scanner look)
+    return cv2.applyColorMap(sharp, cv2.COLORMAP_BONE)
+def xray_bright(img):
+    # 1. The Blue channel is best for cutting through haze and bright glare
+    b, g, r = cv2.split(img)
+    
+    # 2. Aggressive Gamma Compression
+    # A power of 2.5 makes midtones very dark, but massively separates the top 5% of blinding highlights
+    b_float = b.astype(np.float64) / 255.0
+    compressed = np.power(b_float, 2.5) * 255.0  
+    
+    # 3. Invert it! This turns the blinding highlights into dark shadows so CLAHE can grip the texture
+    inverted = 255 - compressed.astype(np.uint8)
+    
+    # 4. Extreme Local Contrast to pull out textures (like watermarks, threads, or hidden text)
+    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+    texture = clahe.apply(inverted)
+    
+    # 5. High-Pass Edge Extraction to define shapes hidden in the glare
+    blur = cv2.GaussianBlur(texture, (0, 0), 3.0)
+    high_pass = cv2.subtract(texture, blur)
+    sharp = cv2.addWeighted(texture, 1.2, high_pass, 1.8, 0)
+    
+    # 6. Apply a cool color map (OCEAN gives a crisp, icy blue look to contrast the hot glare)
+    return cv2.applyColorMap(sharp, cv2.COLORMAP_OCEAN)    
+
 XRAY_MAP = {
     "structure": xray_structure,
     "depth": xray_depth,
     "frequency": xray_frequency,
     "thermal": xray_thermal,
     "bones": xray_bones,
+    "reveal": xray_reveal,
+    "bright": xray_bright,
 }
 
 

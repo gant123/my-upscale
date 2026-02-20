@@ -15,6 +15,8 @@ const XRAY_MODES = [
   { id: 'frequency', label: 'Frequency' },
   { id: 'thermal', label: 'Thermal' },
   { id: 'bones', label: 'Bones' },
+  { id: 'reveal', label: 'Reveal' },
+  { id: 'bright', label: 'Bright' },
 ]
 
 const DEFAULTS = {
@@ -473,8 +475,8 @@ const R = {
   // Slider
   slRow: { marginBottom: 8 },
   slHead: { display: 'flex', justifyContent: 'space-between', marginBottom: 2 },
-  slLabel: { fontSize: 10, color: '#444' },
-  slVal: { fontSize: 10, color: '#777', fontWeight: 700 },
+  slLabel: { fontSize: 10, color: '#a09f9fff' },
+  slVal: { fontSize: 10, color: '#b8b6b6ff', fontWeight: 700 },
   slTrack: { position: 'relative', height: 14, display: 'flex', alignItems: 'center' },
   slBg: { position: 'absolute', left: 0, right: 0, height: 2, backgroundColor: '#1a1a1e', borderRadius: 1 },
   slFill: { position: 'absolute', height: 2, backgroundColor: C.cyan, borderRadius: 1 },
