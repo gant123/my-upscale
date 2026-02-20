@@ -100,10 +100,6 @@ const App = () => {
   const handleOpen = useCallback(async () => {
     const f = await window.api.selectImage()
     if (!f) return
-    if (f.error) {
-      alert(f.error)
-      return
-    }
     setOriginalPath(f.path)
     setOriginalPreview(f.preview)
     setResultPreview(null)

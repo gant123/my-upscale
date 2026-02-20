@@ -19,7 +19,7 @@ const ALLOWED_XRAY_MODES = new Set([
   'bright',
   'occlusion'
 ])
-const MAX_IMAGE_SIZE_BYTES = 500 * 1024 * 1024
+const MAX_IMAGE_SIZE_BYTES = 50 * 1024 * 1024
 const ENGINE_TIMEOUT_MS = 30_000
 
 function getMime(p) {
@@ -149,7 +149,7 @@ function createWindow() {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
-      sandbox: false,
+      sandbox: true,
       webSecurity: true,
       nodeIntegration: false
     }
