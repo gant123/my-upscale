@@ -518,6 +518,7 @@ const App = () => {
 
         {!originalPath && (
           <div style={R.empty}>
+            <div style={R.emptyPill}>Ready for Intake</div>
             <svg
               width="56"
               height="56"
@@ -737,20 +738,21 @@ const R = {
     borderRight: `1px solid ${C.border}`,
     paddingTop: 48
   },
-  sideScroll: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '12px 12px 6px' },
+  sideScroll: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '16px 14px 8px' },
 
-  brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0 10px' },
+  brand: { display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0 14px' },
   brandIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     flexShrink: 0,
-    background: `linear-gradient(135deg, ${C.cyan} 0%, #3a6080 100%)`
+    boxShadow: '0 8px 24px rgba(30,64,175,0.35)',
+    background: `linear-gradient(135deg, ${C.cyan} 0%, #1d4ed8 100%)`
   },
-  brandName: { fontSize: 12, fontWeight: 800, color: '#ccc', letterSpacing: '1.5px' },
-  brandSub: { fontSize: 8, color: '#2a2a2e', letterSpacing: '1.5px', textTransform: 'uppercase' },
+  brandName: { fontSize: 13, fontWeight: 800, color: '#dbeafe', letterSpacing: '1.2px' },
+  brandSub: { fontSize: 8, color: '#8aa1c7', letterSpacing: '1.3px', textTransform: 'uppercase' },
 
-  sep: { height: 1, backgroundColor: C.border, margin: '4px 0' },
+  sep: { height: 1, backgroundColor: C.border, margin: '8px 0' },
 
   ph: {
     display: 'flex',
@@ -892,7 +894,39 @@ const R = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.bg
+    background: 'radial-gradient(circle at 30% 10%, #13203a 0%, #0b1220 45%, #090f1b 100%)'
+  },
+  topBar: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 48,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0 18px',
+    borderBottom: `1px solid ${C.border}`,
+    color: '#d8e4ff',
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: '0.6px',
+    background: 'linear-gradient(90deg,#0f172a,#182a4a)'
+  },
+  topTitleWrap: { display: 'flex', flexDirection: 'column', gap: 2 },
+  topSubTitle: { fontSize: 9, color: '#94a3b8', fontWeight: 500, letterSpacing: '0.4px' },
+  topMeta: { fontSize: 10, color: '#bfdbfe', fontWeight: 700 },
+  errorBanner: {
+    position: 'fixed',
+    top: 48,
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    padding: '10px 18px',
+    color: '#fecaca',
+    backgroundColor: 'rgba(127,29,29,0.35)',
+    borderBottom: '1px solid rgba(239,68,68,0.35)',
+    fontSize: 12
   },
   topBar: {
     position: 'fixed',
@@ -948,9 +982,26 @@ const R = {
   },
   busyText: { fontSize: 11, color: '#555', letterSpacing: '1px' },
 
-  empty: { textAlign: 'center' },
-  emptyTitle: { fontSize: 12, color: '#1a1a1e', marginTop: 14, letterSpacing: '0.5px' },
-  emptyHint: { fontSize: 9, color: '#141418', marginTop: 4 },
+  empty: { textAlign: 'center', maxWidth: 560, padding: 30 },
+  emptyPill: {
+    display: 'inline-block',
+    marginBottom: 14,
+    fontSize: 10,
+    padding: '4px 10px',
+    borderRadius: 999,
+    color: '#bfdbfe',
+    border: '1px solid rgba(147,197,253,0.35)',
+    backgroundColor: 'rgba(59,130,246,0.14)',
+    letterSpacing: '0.7px'
+  },
+  emptyTitle: {
+    fontSize: 20,
+    color: '#dbeafe',
+    marginTop: 14,
+    letterSpacing: '0.2px',
+    fontWeight: 700
+  },
+  emptyHint: { fontSize: 12, color: '#93a7c5', marginTop: 8 },
 
   canvasTag: {
     position: 'absolute',
