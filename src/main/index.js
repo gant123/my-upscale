@@ -172,12 +172,17 @@ app.whenReady().then(() => {
 
   // ─── File Picker ───
   ipcMain.handle('dialog:openFile', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      properties: ['openFile'],
-      filters: [{ name: 'Images', extensions: ['jpg', 'png', 'jpeg', 'webp', 'bmp', 'tiff'] }]
-    })
-    if (canceled) return null
-    return { path: filePaths[0], preview: toBase64(filePaths[0]) }
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['jpg', 'png', 'jpeg', 'webp', 'bmp', 'tiff'] }]
+      })
+      if (canceled) return null
+      if (!isValidImagePath(filePaths[0])) return { error: 'Unsupported, missing, or too large image file' }
+      return { path: filePaths[0], preview: toBase64(filePaths[0]) }
+    } catch (error) {
+      return { error: `Failed to open image: ${error.message}` }
+    }
   })
 
   // ─── Analyze ───
