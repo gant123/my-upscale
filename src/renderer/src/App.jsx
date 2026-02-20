@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 const ENHANCE_MODES = [
   { id: 'pro', label: 'Pro Detail' },
@@ -46,6 +46,7 @@ const App = () => {
   const [resultPreview, setResultPreview] = useState(null)
   const [tempPath, setTempPath] = useState(null)
   const [resultLabel, setResultLabel] = useState('')
+  const [uiError, setUiError] = useState('')
 
   const [busy, setBusy] = useState(false)
   const [busyMsg, setBusyMsg] = useState('')
@@ -100,6 +101,12 @@ const App = () => {
   const handleOpen = useCallback(async () => {
     const f = await window.api.selectImage()
     if (!f) return
+    if (f.error) {
+      setUiError(f.error)
+      return
+    }
+
+    setUiError('')
     setOriginalPath(f.path)
     setOriginalPreview(f.preview)
     setResultPreview(null)
@@ -113,6 +120,7 @@ const App = () => {
 
   const handleAnalyze = useCallback(async () => {
     if (!originalPath) return
+    setUiError('')
     setBusy(true)
     setBusyMsg('Analyzing')
     try {
@@ -136,6 +144,7 @@ const App = () => {
 
   const handleApply = useCallback(async () => {
     if (!originalPath || !dirty) return
+    setUiError('')
     setBusy(true)
     setBusyMsg('Adjusting')
     try {
@@ -152,6 +161,7 @@ const App = () => {
 
   const handleEnhance = useCallback(async () => {
     if (!originalPath) return
+    setUiError('')
     setBusy(true)
     setBusyMsg('Enhancing')
     try {
@@ -188,6 +198,15 @@ const App = () => {
   // ════════════════════════════════════════════════════════════════════
   return (
     <div style={R.root}>
+      <div style={R.topBar}>
+        <div>Enterprise Image Ops Console</div>
+        <div style={R.topMeta}>
+          {originalPath ? 'Secure Session Active' : 'Awaiting asset upload'}
+        </div>
+      </div>
+
+      {uiError && <div style={R.errorBanner}>{uiError}</div>}
+
       {/* ── SIDEBAR ── */}
       <div style={R.sidebar}>
         <div style={R.sideScroll}>
@@ -195,8 +214,8 @@ const App = () => {
           <div style={R.brand}>
             <div style={R.brandIcon} />
             <div>
-              <div style={R.brandName}>PROENHANCE</div>
-              <div style={R.brandSub}>processing studio</div>
+              <div style={R.brandName}>AURORA ENTERPRISE</div>
+              <div style={R.brandSub}>image intelligence suite</div>
             </div>
           </div>
           <div style={R.sep} />
@@ -511,8 +530,8 @@ const App = () => {
               <circle cx="8.5" cy="8.5" r="1.5" />
               <path d="M21 15l-5-5L5 21" />
             </svg>
-            <div style={R.emptyTitle}>Open an image to begin</div>
-            <div style={R.emptyHint}>JPG / PNG / WebP / BMP / TIFF</div>
+            <div style={R.emptyTitle}>Upload an asset to start a processing workflow</div>
+            <div style={R.emptyHint}>Supports JPG, PNG, WebP, BMP and TIFF files up to 50MB</div>
           </div>
         )}
 
@@ -629,7 +648,7 @@ function Btn({ children, onClick, disabled, accent, primary, full, style }) {
         borderRadius: 3,
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.4 : 1,
-        width: full || true ? '100%' : 'auto',
+        width: full ? '100%' : 'auto',
         transition: 'opacity 0.15s',
         ...style
       }}
@@ -684,14 +703,14 @@ function MC({ l, v, c }) {
 }
 
 const C = {
-  cyan: '#5eafd6',
-  amber: '#d4a344',
-  red: '#c44',
-  green: '#4a4',
-  dim: '#333',
-  bg: '#09090b',
-  sidebar: '#0b0b0e',
-  border: '#141418'
+  cyan: '#53a8ff',
+  amber: '#e7b35e',
+  red: '#ef6464',
+  green: '#59c48f',
+  dim: '#8792a2',
+  bg: '#0b1220',
+  sidebar: '#0f172a',
+  border: '#1e293b'
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -710,12 +729,13 @@ const R = {
     fontSize: 11
   },
   sidebar: {
-    width: 284,
-    minWidth: 284,
+    width: 320,
+    minWidth: 320,
     display: 'flex',
     flexDirection: 'column',
     backgroundColor: C.sidebar,
-    borderRight: `1px solid ${C.border}`
+    borderRight: `1px solid ${C.border}`,
+    paddingTop: 48
   },
   sideScroll: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '12px 12px 6px' },
 
@@ -867,11 +887,42 @@ const R = {
   canvas: {
     flex: 1,
     position: 'relative',
+    paddingTop: 48,
     overflow: 'hidden',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.bg
+  },
+  topBar: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 48,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0 18px',
+    borderBottom: `1px solid ${C.border}`,
+    color: '#d8e4ff',
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: '0.6px',
+    background: 'linear-gradient(90deg,#0f172a,#111c33)'
+  },
+  topMeta: { fontSize: 10, color: '#94a3b8', fontWeight: 600 },
+  errorBanner: {
+    position: 'fixed',
+    top: 48,
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    padding: '10px 18px',
+    color: '#fecaca',
+    backgroundColor: 'rgba(127,29,29,0.35)',
+    borderBottom: '1px solid rgba(239,68,68,0.35)',
+    fontSize: 12
   },
   img: { position: 'absolute', width: '100%', height: '100%', objectFit: 'contain' },
 
