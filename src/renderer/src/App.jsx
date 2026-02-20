@@ -1,11 +1,23 @@
-import { useState, useCallback, useEffect } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+/**
+ * Enterprise Revamp — App.jsx
+ * - Live slider adjustments (debounced, latest-wins)
+ * - Tabs for control panels
+ * - Toasts instead of alerts
+ * - Better status + pipeline UX
+ * - Spacebar hold to compare original
+ */
+
+// ----------------------------
+// Constants
+// ----------------------------
 const ENHANCE_MODES = [
-  { id: 'pro', label: 'Pro Detail' },
-  { id: 'color', label: 'Color Restore' },
-  { id: 'smooth', label: 'Denoise' },
-  { id: 'light', label: 'Lighting Fix' },
-  { id: 'portrait', label: 'Portrait' }
+  { id: 'pro', label: 'Pro Detail', desc: 'Sharpness + micro-contrast enhancement' },
+  { id: 'color', label: 'Color Restore', desc: 'Recover fading / balance color' },
+  { id: 'smooth', label: 'Denoise', desc: 'Reduce noise / compression artifacts' },
+  { id: 'light', label: 'Lighting Fix', desc: 'Shadow/highlight recovery and lift' },
+  { id: 'portrait', label: 'Portrait', desc: 'Skin-safe tuning, facial detail preservation' }
 ]
 
 const XRAY_MODES = [
@@ -40,99 +52,170 @@ const DEFAULTS = {
   xray_blend: 100
 }
 
-const App = () => {
+const TABS = [
+  { id: 'intake', label: 'Intake' },
+  { id: 'adjust', label: 'Adjust' },
+  { id: 'enhance', label: 'Enhance' },
+  { id: 'analyze', label: 'Analyze' },
+  { id: 'export', label: 'Export' }
+]
+
+// ----------------------------
+// App
+// ----------------------------
+export default function App() {
+  // Core image state
   const [originalPath, setOriginalPath] = useState(null)
   const [originalPreview, setOriginalPreview] = useState(null)
+
   const [resultPreview, setResultPreview] = useState(null)
   const [tempPath, setTempPath] = useState(null)
   const [resultLabel, setResultLabel] = useState('')
-  const [uiError, setUiError] = useState('')
 
-  const [busy, setBusy] = useState(false)
-  const [busyMsg, setBusyMsg] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [holdOriginal, setHoldOriginal] = useState(false)
-  const [splitPos, setSplitPos] = useState(50)
-
+  // Adjustments / layers
   const [adj, setAdj] = useState({ ...DEFAULTS })
-  const [adjustReady, setAdjustReady] = useState(false)
   const [activeLayers, setActiveLayers] = useState(['pro'])
+  const [liveAdjust, setLiveAdjust] = useState(true)
 
+  // Analysis output
   const [diagnosis, setDiagnosis] = useState(null)
   const [metrics, setMetrics] = useState(null)
   const [rec, setRec] = useState(null)
 
-  const [panels, setPanels] = useState({
-    source: true,
-    analysis: false,
-    tone: true,
-    color: false,
-    detail: false,
-    effects: false,
-    xray: false,
-    layers: true
-  })
-useEffect(() => {
-  console.log('__preload_ok:', window.__preload_ok)
-  console.log('window.api:', window.api)
-}, [])
-  const togglePanel = (k) => setPanels((p) => ({ ...p, [k]: !p[k] }))
-  const setA = (k, v) => setAdj((p) => ({ ...p, [k]: v }))
-  const toggleLayer = (id) =>
-    setActiveLayers((p) => {
-      if (p.includes(id)) {
-        const n = p.filter((m) => m !== id)
-        return n.length ? n : p
-      }
-      return [...p, id]
-    })
+  // UI
+  const [tab, setTab] = useState('intake')
+  const [busy, setBusy] = useState(false)
+  const [busyMsg, setBusyMsg] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [uiError, setUiError] = useState('')
+  const [toast, setToast] = useState(null)
 
-  const dirty = Object.keys(DEFAULTS).some((k) => adj[k] !== DEFAULTS[k])
-  const fileName = originalPath ? originalPath.split(/[/\\]/).pop() : null
+  // Compare slider + hold-to-compare
+  const [holdOriginal, setHoldOriginal] = useState(false)
+  const [splitPos, setSplitPos] = useState(55)
+  const [zoom, setZoom] = useState(1) // simple zoom control (optional)
+  const [fitMode, setFitMode] = useState('contain') // contain | cover
 
+  // Derived
+  const fileName = useMemo(
+    () => (originalPath ? originalPath.split(/[/\\]/).pop() : null),
+    [originalPath]
+  )
+  const dirty = useMemo(
+    () => Object.keys(DEFAULTS).some((k) => adj[k] !== DEFAULTS[k]),
+    [adj]
+  )
+  const hasResult = !!resultPreview && !!tempPath
+
+  // ----------------------------
+  // Toast helper
+  // ----------------------------
+  const pushToast = useCallback((type, title, message) => {
+    setToast({ type, title, message, ts: Date.now() })
+    window.clearTimeout(pushToast._t)
+    pushToast._t = window.setTimeout(() => setToast(null), 2800)
+  }, [])
+  pushToast._t = pushToast._t || 0
+
+  // ----------------------------
+  // Keyboard shortcuts
+  // ----------------------------
   useEffect(() => {
-    if (!originalPath || !dirty) {
-      setAdjustReady(false)
-      return
+    const onKeyDown = (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault()
+        setHoldOriginal(true)
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault()
+        handleOpen()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (tempPath) handleSave()
+      }
+      if (e.key === 'Escape') {
+        setUiError('')
+        setToast(null)
+      }
     }
+    const onKeyUp = (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault()
+        setHoldOriginal(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tempPath])
 
-    setAdjustReady(false)
-    const timer = window.setTimeout(() => setAdjustReady(true), 250)
-    return () => window.clearTimeout(timer)
-  }, [adj, dirty, originalPath])
-
-const handleOpen = useCallback(async () => {
-  try {
-    console.log('window.api:', window.api)
-
-    if (!window.api || !window.api.selectImage) {
-      alert(
-        'window.api is missing. Preload did not expose API. Check preload path + contextBridge.'
+  // ----------------------------
+  // API Guards (enterprise: fail loudly but cleanly)
+  // ----------------------------
+  useEffect(() => {
+    if (!window.api) {
+      setUiError(
+        'Backend bridge unavailable (window.api missing). Check preload + contextBridge. (Tip: sandbox: false on Wayland)'
       )
-      return
     }
+  }, [])
 
-    const f = await window.api.selectImage()
-    if (!f) return
-    if (f.error) return alert('Could not load image: ' + f.error)
+  // ----------------------------
+  // Open image
+  // ----------------------------
+  const handleOpen = useCallback(async () => {
+    try {
+      setUiError('')
+      if (!window.api?.selectImage) {
+        setUiError('Backend API not available: window.api.selectImage missing.')
+        pushToast('error', 'Backend', 'Preload bridge missing: window.api.selectImage')
+        return
+      }
 
-    setOriginalPath(f.path)
-    setOriginalPreview(f.preview)
-    setResultPreview(null)
-    setTempPath(null)
-    setResultLabel('')
-    setDiagnosis(null)
-    setMetrics(null)
-    setRec(null)
-    setAdj({ ...DEFAULTS })
-  } catch (err) {
-    console.error('Error selecting image:', err)
-    alert('Frontend Error: ' + err.message)
-  }
-}, [])
+      const f = await window.api.selectImage()
+      if (!f) return
+      if (f.error) {
+        setUiError(f.error)
+        pushToast('error', 'Load failed', f.error)
+        return
+      }
 
+      // Reset state
+      setOriginalPath(f.path)
+      setOriginalPreview(f.preview)
 
+      setResultPreview(null)
+      setTempPath(null)
+      setResultLabel('')
 
+      setDiagnosis(null)
+      setMetrics(null)
+      setRec(null)
+
+      setAdj({ ...DEFAULTS })
+      setActiveLayers(['pro'])
+      setSplitPos(55)
+      setZoom(1)
+      setFitMode('contain')
+
+      setTab('adjust')
+      pushToast('ok', 'Asset loaded', fileNameFromPath(f.path))
+    } catch (err) {
+      const msg = err?.message || 'Failed to open file'
+      setUiError(msg)
+      pushToast('error', 'Open failed', msg)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pushToast])
+
+  // ----------------------------
+  // Autopilot analysis
+  // ----------------------------
   const handleAnalyze = useCallback(async () => {
     if (!originalPath) return
     setUiError('')
@@ -140,39 +223,45 @@ const handleOpen = useCallback(async () => {
     setBusyMsg('Analyzing')
     try {
       const r = await window.api.runAutopilot(originalPath)
-      if (r.recommendations) {
-        setDiagnosis(r.analysis)
-        setMetrics(r.metrics)
-        setRec(r.recommendations)
+      if (r?.error) {
+        setUiError(r.error)
+        pushToast('error', 'Analysis failed', r.error)
+        return
+      }
+      if (r?.recommendations) {
+        setDiagnosis(r.analysis || null)
+        setMetrics(r.metrics || null)
+        setRec(r.recommendations || null)
+
         if (r.recommendations.best_mode) setActiveLayers([r.recommendations.best_mode])
+
+        // Seed adjustments (safe defaults)
         setAdj((p) => ({
           ...p,
           exposure: r.recommendations.exposure || 0,
-          saturation: Math.round((r.recommendations.saturation - 1) * 100) || 0
+          saturation: Math.round(((r.recommendations.saturation || 1) - 1) * 100) || 0
         }))
-        setPanels((p) => ({ ...p, analysis: true }))
+        setTab('adjust')
+        pushToast('ok', 'Analysis ready', `Recommended: ${String(r.recommendations.best_mode || '').toUpperCase()}`)
       }
     } finally {
       setBusy(false)
+      setBusyMsg('')
     }
-  }, [originalPath])
+  }, [originalPath, pushToast])
 
-  const handleApply = useCallback(async () => {
-    if (!originalPath || !dirty) return
-    setUiError('')
-    setBusy(true)
-    setBusyMsg('Adjusting')
-    try {
-      const r = await window.api.adjustImage(originalPath, adj)
-      if (r.temp_path) {
-        setTempPath(r.temp_path)
-        setResultPreview(r.preview)
-        setResultLabel('Adjusted')
-      } else if (r.error) alert(r.error)
-    } finally {
-      setBusy(false)
-    }
-  }, [originalPath, adj, dirty])
+  // ----------------------------
+  // Enhance pipeline
+  // ----------------------------
+  const toggleLayer = useCallback((id) => {
+    setActiveLayers((p) => {
+      if (p.includes(id)) {
+        const n = p.filter((m) => m !== id)
+        return n.length ? n : p
+      }
+      return [...p, id]
+    })
+  }, [])
 
   const handleEnhance = useCallback(async () => {
     if (!originalPath) return
@@ -181,935 +270,1415 @@ const handleOpen = useCallback(async () => {
     setBusyMsg('Enhancing')
     try {
       const r = await window.api.enhanceImage(originalPath, activeLayers)
-      if (r.temp_path) {
+      if (r?.error) {
+        setUiError(r.error)
+        pushToast('error', 'Enhance failed', r.error)
+        return
+      }
+      if (r?.temp_path) {
         setTempPath(r.temp_path)
         setResultPreview(r.preview)
         setResultLabel((r.applied_modes || activeLayers).join(' + '))
-      } else if (r.error) alert(r.error)
+        setTab('export')
+        pushToast('ok', 'Enhance complete', 'Result ready to export')
+      }
     } finally {
       setBusy(false)
+      setBusyMsg('')
     }
-  }, [originalPath, activeLayers])
+  }, [activeLayers, originalPath, pushToast])
 
+  // ----------------------------
+  // Save / Export
+  // ----------------------------
   const handleSave = useCallback(async () => {
     if (!tempPath) return
     setSaving(true)
     try {
       const r = await window.api.saveImage(tempPath)
-      if (r.saved_path) {
+      if (r?.saved_path) {
+        pushToast('ok', 'Saved', fileNameFromPath(r.saved_path))
         setSaving('done')
-        setTimeout(() => setSaving(false), 2000)
+        setTimeout(() => setSaving(false), 1600)
       } else {
-        if (r.error !== 'Cancelled') alert(r.error)
+        if (r?.error && r.error !== 'Cancelled') {
+          setUiError(r.error)
+          pushToast('error', 'Save failed', r.error)
+        }
         setSaving(false)
       }
-    } catch {
+    } catch (e) {
+      const msg = e?.message || 'Save failed'
+      setUiError(msg)
+      pushToast('error', 'Save failed', msg)
       setSaving(false)
     }
-  }, [tempPath])
+  }, [tempPath, pushToast])
 
-  const handleReset = () => setAdj({ ...DEFAULTS })
+  // ----------------------------
+  // Live Adjust engine call (debounced, latest-wins)
+  // ----------------------------
+  const adjustTimerRef = useRef(null)
+  const adjustSeqRef = useRef(0)
+  const inFlightRef = useRef(false)
 
-  // ════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!liveAdjust) return
+    if (!originalPath) return
+    if (!dirty) return
+    if (!window.api?.adjustImage) return
+
+    if (adjustTimerRef.current) window.clearTimeout(adjustTimerRef.current)
+
+    adjustTimerRef.current = window.setTimeout(async () => {
+      if (inFlightRef.current) return
+
+      const seq = ++adjustSeqRef.current
+      inFlightRef.current = true
+
+      setBusy(true)
+      setBusyMsg('Adjusting')
+
+      try {
+        const r = await window.api.adjustImage(originalPath, adj)
+
+        // ignore outdated responses
+        if (seq !== adjustSeqRef.current) return
+
+        if (r?.error) {
+          setUiError(r.error)
+          return
+        }
+        if (r?.temp_path) {
+          setTempPath(r.temp_path)
+          setResultPreview(r.preview)
+          setResultLabel('Live Adjust')
+        }
+      } catch (e) {
+        if (seq === adjustSeqRef.current) setUiError(e?.message || 'Adjust failed')
+      } finally {
+        if (seq === adjustSeqRef.current) {
+          setBusy(false)
+          setBusyMsg('')
+        }
+        inFlightRef.current = false
+      }
+    }, 140)
+
+    return () => {
+      if (adjustTimerRef.current) window.clearTimeout(adjustTimerRef.current)
+    }
+  }, [adj, dirty, originalPath, liveAdjust])
+
+  // Manual apply if liveAdjust disabled
+  const handleApply = useCallback(async () => {
+    if (!originalPath || !dirty) return
+    setUiError('')
+    setBusy(true)
+    setBusyMsg('Adjusting')
+    try {
+      const r = await window.api.adjustImage(originalPath, adj)
+      if (r?.error) {
+        setUiError(r.error)
+        pushToast('error', 'Adjust failed', r.error)
+        return
+      }
+      if (r?.temp_path) {
+        setTempPath(r.temp_path)
+        setResultPreview(r.preview)
+        setResultLabel('Adjusted')
+        pushToast('ok', 'Applied', 'Adjustments applied')
+      }
+    } finally {
+      setBusy(false)
+      setBusyMsg('')
+    }
+  }, [adj, dirty, originalPath, pushToast])
+
+  const handleReset = useCallback(() => {
+    setAdj({ ...DEFAULTS })
+    pushToast('ok', 'Reset', 'Adjustments reset to defaults')
+  }, [pushToast])
+
+  // ----------------------------
+  // UI helpers
+  // ----------------------------
+  const setA = useCallback((k, v) => setAdj((p) => ({ ...p, [k]: v })), [])
+  const pipeline = useMemo(() => activeLayers.join(' → '), [activeLayers])
+
+  const sessionStatus = useMemo(() => {
+    if (!originalPath) return { label: 'Idle', tone: 'dim' }
+    if (busy) return { label: busyMsg || 'Working', tone: 'amber' }
+    if (hasResult) return { label: 'Result Ready', tone: 'green' }
+    if (dirty) return { label: liveAdjust ? 'Live Adjust' : 'Draft Changes', tone: 'cyan' }
+    return { label: 'Loaded', tone: 'cyan' }
+  }, [busy, busyMsg, dirty, hasResult, liveAdjust, originalPath])
+
+  // ----------------------------
+  // Render
+  // ----------------------------
   return (
-    <div style={R.root}>
-      <div style={R.topBar}>
-        <div>Enterprise Image Ops Console</div>
-        <div style={R.topMeta}>
-          {originalPath ? 'Secure Session Active' : 'Awaiting asset upload'}
+    <div style={S.app}>
+      <TopBar
+        fileName={fileName}
+        status={sessionStatus}
+        onOpen={handleOpen}
+        onAnalyze={handleAnalyze}
+        onEnhance={handleEnhance}
+        onSave={handleSave}
+        canAnalyze={!!originalPath && !busy}
+        canEnhance={!!originalPath && !busy}
+        canSave={!!tempPath && !saving}
+        busy={busy}
+        saving={saving}
+        zoom={zoom}
+        setZoom={setZoom}
+        fitMode={fitMode}
+        setFitMode={setFitMode}
+      />
+
+      {uiError ? (
+        <div style={S.bannerError}>
+          <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>ERROR</div>
+          <div style={{ opacity: 0.9 }}>{uiError}</div>
+          <button onClick={() => setUiError('')} style={S.bannerBtn}>
+            Dismiss
+          </button>
         </div>
-      </div>
+      ) : null}
 
-      {uiError && <div style={R.errorBanner}>{uiError}</div>}
-
-      {/* ── SIDEBAR ── */}
-      <div style={R.sidebar}>
-        <div style={R.sideScroll}>
-          {/* Brand */}
-          <div style={R.brand}>
-            <div style={R.brandIcon} />
-            <div>
-              <div style={R.brandName}>AURORA ENTERPRISE</div>
-              <div style={R.brandSub}>image intelligence suite</div>
+      <div style={S.body}>
+        <aside style={S.sidebar}>
+          <div style={S.brand}>
+            <div style={S.brandIcon} />
+            <div style={{ minWidth: 0 }}>
+              <div style={S.brandTitle}>AURORA OPS</div>
+              <div style={S.brandSub}>Enterprise Imaging Console</div>
             </div>
           </div>
-          <div style={R.sep} />
 
-          {/* Source */}
-          <PH title="SOURCE" open={panels.source} toggle={() => togglePanel('source')}>
-            <Btn onClick={handleOpen}>{originalPath ? 'CHANGE IMAGE' : 'OPEN IMAGE'}</Btn>
-            {fileName && <div style={R.fileInfo}>{fileName}</div>}
-            {metrics && (
-              <div style={R.fileDim}>
-                {metrics.width}x{metrics.height}
-              </div>
-            )}
-          </PH>
+          <TabRow tab={tab} setTab={setTab} />
 
-          {/* Autopilot */}
-          <PH title="AUTOPILOT" open={panels.analysis} toggle={() => togglePanel('analysis')}>
-            <Btn onClick={handleAnalyze} disabled={busy || !originalPath} accent>
-              {busy && busyMsg === 'Analyzing' ? 'ANALYZING...' : 'RUN ANALYSIS'}
-            </Btn>
-            {diagnosis && <div style={R.diagBox}>{diagnosis}</div>}
-            {metrics && (
-              <div style={R.mGrid}>
-                <MC
-                  l="NOISE"
-                  v={metrics.noise}
-                  c={metrics.noise > 15 ? C.red : metrics.noise > 8 ? C.amber : C.green}
+          <div style={S.panel}>
+            {tab === 'intake' && (
+              <Panel title="Intake" subtitle="Load an asset and start a workflow">
+                <PrimaryButton onClick={handleOpen}>
+                  {originalPath ? 'Change Image' : 'Open Image'}
+                </PrimaryButton>
+
+                <FieldRow label="Asset" value={fileName || '—'} mono />
+                <FieldRow
+                  label="Session"
+                  value={originalPath ? 'Secure session active' : 'Awaiting asset'}
                 />
-                <MC
-                  l="SHARP"
-                  v={metrics.sharpness > 500 ? 'HI' : metrics.sharpness > 100 ? 'MED' : 'LO'}
-                  c={metrics.sharpness > 500 ? C.green : metrics.sharpness > 100 ? C.amber : C.red}
-                />
-                <MC
-                  l="RANGE"
-                  v={metrics.dynamic_range}
-                  c={metrics.dynamic_range > 200 ? C.green : C.amber}
-                />
-                <MC
-                  l="SKIN"
-                  v={`${metrics.skin_pct}%`}
-                  c={metrics.skin_pct > 15 ? C.cyan : C.dim}
-                />
-              </div>
+
+                <Divider />
+
+                <Hint>
+                  Shortcuts: <K>Ctrl</K>+<K>O</K> open · <K>Space</K> hold compare · <K>Ctrl</K>+<K>S</K> save
+                </Hint>
+              </Panel>
             )}
-            {rec && (
-              <div style={R.recBox}>
-                <span style={R.recLbl}>REC </span>
-                <span style={R.recVal}>{rec.best_mode.toUpperCase()}</span>
-                <div style={R.recWhy}>{rec.mode_reason}</div>
-                {Array.isArray(rec.xray_modes) && rec.xray_modes.length > 0 && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: C.dim }}>
-                    XRAY:{' '}
-                    {rec.xray_modes
-                      .slice(0, 2)
-                      .map((m) => `${m.mode} (${Math.round(m.confidence)}%)`)
-                      .join(' · ')}
-                  </div>
+
+            {tab === 'adjust' && (
+              <Panel title="Adjust" subtitle="Real-time tonal and color corrections">
+                <ToggleRow
+                  label="Live Adjust"
+                  value={liveAdjust}
+                  onToggle={() => setLiveAdjust((v) => !v)}
+                  hint="Updates preview while you drag sliders"
+                />
+
+                {!liveAdjust && dirty && (
+                  <PrimaryButton onClick={handleApply} disabled={busy}>
+                    {busy && busyMsg === 'Adjusting' ? 'Applying…' : 'Apply Changes'}
+                  </PrimaryButton>
                 )}
-              </div>
+
+                <SecondaryButton onClick={handleReset} disabled={!dirty}>
+                  Reset to Defaults
+                </SecondaryButton>
+
+                <Divider />
+
+                <SectionTitle>Tone</SectionTitle>
+                <Slider label="Exposure" value={adj.exposure} min={-3} max={3} step={0.05} onChange={(v) => setA('exposure', v)} />
+                <Slider label="Contrast" value={adj.contrast} min={-100} max={100} step={1} onChange={(v) => setA('contrast', v)} />
+                <Slider label="Highlights" value={adj.highlights} min={-100} max={100} step={1} onChange={(v) => setA('highlights', v)} />
+                <Slider label="Shadows" value={adj.shadows} min={-100} max={100} step={1} onChange={(v) => setA('shadows', v)} />
+                <Slider label="Whites" value={adj.whites} min={-100} max={100} step={1} onChange={(v) => setA('whites', v)} />
+                <Slider label="Blacks" value={adj.blacks} min={-100} max={100} step={1} onChange={(v) => setA('blacks', v)} />
+
+                <Divider />
+
+                <SectionTitle>Color</SectionTitle>
+                <Slider label="Temperature" value={adj.temperature} min={-100} max={100} step={1} onChange={(v) => setA('temperature', v)} />
+                <Slider label="Tint" value={adj.tint} min={-100} max={100} step={1} onChange={(v) => setA('tint', v)} />
+                <Slider label="Vibrance" value={adj.vibrance} min={-100} max={100} step={1} onChange={(v) => setA('vibrance', v)} />
+                <Slider label="Saturation" value={adj.saturation} min={-100} max={100} step={1} onChange={(v) => setA('saturation', v)} />
+
+                <Divider />
+
+                <SectionTitle>Detail & Effects</SectionTitle>
+                <Slider label="Clarity" value={adj.clarity} min={-100} max={100} step={1} onChange={(v) => setA('clarity', v)} />
+                <Slider label="Dehaze" value={adj.dehaze} min={0} max={100} step={1} onChange={(v) => setA('dehaze', v)} />
+                <Slider label="Sharpness" value={adj.sharpness} min={0} max={100} step={1} onChange={(v) => setA('sharpness', v)} />
+                <Slider label="Grain" value={adj.grain} min={0} max={100} step={1} onChange={(v) => setA('grain', v)} />
+                <Slider label="Vignette" value={adj.vignette} min={-100} max={100} step={1} onChange={(v) => setA('vignette', v)} />
+
+                <Divider />
+
+                <SectionTitle>X-Ray</SectionTitle>
+                <Pills
+                  items={XRAY_MODES}
+                  value={adj.xray}
+                  onChange={(id) => setA('xray', id)}
+                />
+                {adj.xray !== 'none' && (
+                  <Slider label="X-Ray Blend" value={adj.xray_blend} min={0} max={100} step={1} onChange={(v) => setA('xray_blend', v)} />
+                )}
+              </Panel>
             )}
-          </PH>
 
-          <div style={R.sep} />
+            {tab === 'enhance' && (
+              <Panel title="Enhance" subtitle="Stackable enhancement layers">
+                <FieldRow label="Pipeline" value={pipeline || '—'} mono />
 
-          {/* Tone */}
-          <PH title="TONE" open={panels.tone} toggle={() => togglePanel('tone')}>
-            <Sl
-              l="Exposure"
-              v={adj.exposure}
-              min={-3}
-              max={3}
-              step={0.05}
-              set={(v) => setA('exposure', v)}
-            />
-            <Sl
-              l="Contrast"
-              v={adj.contrast}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('contrast', v)}
-            />
-            <Sl
-              l="Highlights"
-              v={adj.highlights}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('highlights', v)}
-            />
-            <Sl
-              l="Shadows"
-              v={adj.shadows}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('shadows', v)}
-            />
-            <Sl
-              l="Whites"
-              v={adj.whites}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('whites', v)}
-            />
-            <Sl
-              l="Blacks"
-              v={adj.blacks}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('blacks', v)}
-            />
-          </PH>
+                <Divider />
 
-          {/* Color */}
-          <PH title="COLOR" open={panels.color} toggle={() => togglePanel('color')}>
-            <Sl
-              l="Temp"
-              v={adj.temperature}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('temperature', v)}
-            />
-            <Sl l="Tint" v={adj.tint} min={-100} max={100} step={1} set={(v) => setA('tint', v)} />
-            <Sl
-              l="Vibrance"
-              v={adj.vibrance}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('vibrance', v)}
-            />
-            <Sl
-              l="Saturation"
-              v={adj.saturation}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('saturation', v)}
-            />
-          </PH>
+                <div style={S.layerGrid}>
+                  {ENHANCE_MODES.map((m) => {
+                    const on = activeLayers.includes(m.id)
+                    const idx = on ? activeLayers.indexOf(m.id) + 1 : null
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => toggleLayer(m.id)}
+                        style={{
+                          ...S.layerCard,
+                          borderColor: on ? C.line2 : C.line,
+                          background: on
+                            ? 'linear-gradient(180deg, rgba(59,130,246,0.14), rgba(2,6,23,0.35))'
+                            : 'rgba(2,6,23,0.25)'
+                        }}
+                      >
+                        <div style={S.layerTop}>
+                          <div style={S.layerIdx}>{idx || '—'}</div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={S.layerName}>{m.label}</div>
+                            <div style={S.layerDesc}>{m.desc}</div>
+                          </div>
+                          <div style={{ ...S.badge, ...(on ? S.badgeOn : S.badgeOff) }}>
+                            {on ? 'ON' : 'OFF'}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
 
-          {/* Detail */}
-          <PH title="DETAIL" open={panels.detail} toggle={() => togglePanel('detail')}>
-            <Sl
-              l="Clarity"
-              v={adj.clarity}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('clarity', v)}
-            />
-            <Sl
-              l="Dehaze"
-              v={adj.dehaze}
-              min={0}
-              max={100}
-              step={1}
-              set={(v) => setA('dehaze', v)}
-            />
-            <Sl
-              l="Sharpen"
-              v={adj.sharpness}
-              min={0}
-              max={100}
-              step={1}
-              set={(v) => setA('sharpness', v)}
-            />
-          </PH>
+                <Divider />
 
-          {/* Effects */}
-          <PH title="EFFECTS" open={panels.effects} toggle={() => togglePanel('effects')}>
-            <Sl l="Grain" v={adj.grain} min={0} max={100} step={1} set={(v) => setA('grain', v)} />
-            <Sl
-              l="Vignette"
-              v={adj.vignette}
-              min={-100}
-              max={100}
-              step={1}
-              set={(v) => setA('vignette', v)}
-            />
-          </PH>
+                <PrimaryButton onClick={handleEnhance} disabled={!originalPath || busy}>
+                  {busy && busyMsg === 'Enhancing' ? 'Processing…' : 'Run Enhance'}
+                </PrimaryButton>
 
-          {/* X-Ray */}
-          <PH title="X-RAY VISION" open={panels.xray} toggle={() => togglePanel('xray')}>
-            <div style={R.xrayRow}>
-              {XRAY_MODES.map((m) => (
-                <button
-                  key={m.id}
-                  style={{
-                    ...R.xrayBtn,
-                    backgroundColor:
-                      adj.xray === m.id ? (m.id === 'none' ? '#1a1a1e' : '#1a1630') : 'transparent',
-                    color: adj.xray === m.id ? (m.id === 'none' ? C.dim : C.cyan) : C.dim,
-                    borderColor: adj.xray === m.id && m.id !== 'none' ? '#2d2660' : '#1a1a1e'
-                  }}
-                  onClick={() => setA('xray', m.id)}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            {adj.xray !== 'none' && (
-              <Sl
-                l="Blend"
-                v={adj.xray_blend}
-                min={0}
-                max={100}
-                step={1}
-                set={(v) => setA('xray_blend', v)}
-              />
+                <Hint>
+                  Tip: Run <b>Analyze</b> first to auto-pick a best layer.
+                </Hint>
+              </Panel>
             )}
-          </PH>
 
-          <div style={R.sep} />
+            {tab === 'analyze' && (
+              <Panel title="Analyze" subtitle="Quality metrics + recommended pipeline">
+                <PrimaryButton onClick={handleAnalyze} disabled={!originalPath || busy}>
+                  {busy && busyMsg === 'Analyzing' ? 'Analyzing…' : 'Run Analysis'}
+                </PrimaryButton>
 
-          {/* Apply adjustments */}
-          {dirty && (
-            <div style={R.adjBar}>
-              <Btn onClick={handleApply} disabled={busy || !adjustReady} primary>
-                {busy && busyMsg === 'Adjusting'
-                  ? 'APPLYING...'
-                  : adjustReady
-                    ? 'APPLY CHANGES'
-                    : 'SETTLING...'}
-              </Btn>
-              <Btn onClick={handleReset}>RESET</Btn>
-            </div>
-          )}
+                <Divider />
 
-          <div style={R.sep} />
+                <FieldRow label="Diagnosis" value={diagnosis || '—'} />
 
-          {/* Enhancement Layers */}
-          <PH title="ENHANCEMENT LAYERS" open={panels.layers} toggle={() => togglePanel('layers')}>
-            <div style={R.layerCol}>
-              {ENHANCE_MODES.map((m) => {
-                const on = activeLayers.includes(m.id)
-                const idx = on ? activeLayers.indexOf(m.id) + 1 : null
-                return (
-                  <button
-                    key={m.id}
-                    style={{
-                      ...R.layerChip,
-                      backgroundColor: on ? '#0c1a2e' : 'transparent',
-                      borderColor: on ? '#1d3461' : '#141418'
-                    }}
-                    onClick={() => toggleLayer(m.id)}
-                  >
-                    <span style={{ ...R.layerIdx, color: on ? C.cyan : '#222' }}>{idx || '-'}</span>
-                    <span style={R.layerLbl}>{m.label}</span>
-                    <span
-                      style={{
-                        ...R.layerBadge,
-                        backgroundColor: on ? '#1d3461' : '#141418',
-                        color: on ? C.cyan : '#333'
+                <Divider />
+
+                <div style={S.metricGrid}>
+                  <Metric label="Noise" value={metrics?.noise ?? '—'} tone={toneNoise(metrics?.noise)} />
+                  <Metric
+                    label="Sharpness"
+                    value={
+                      metrics?.sharpness == null
+                        ? '—'
+                        : metrics.sharpness > 500
+                          ? 'HI'
+                          : metrics.sharpness > 100
+                            ? 'MED'
+                            : 'LO'
+                    }
+                    tone={toneSharp(metrics?.sharpness)}
+                  />
+                  <Metric label="Range" value={metrics?.dynamic_range ?? '—'} tone={toneRange(metrics?.dynamic_range)} />
+                  <Metric label="Skin" value={metrics?.skin_pct == null ? '—' : `${metrics.skin_pct}%`} tone={toneSkin(metrics?.skin_pct)} />
+                </div>
+
+                <Divider />
+
+                <div style={S.recCard}>
+                  <div style={S.recHead}>
+                    <div style={S.recTitle}>Recommendation</div>
+                    <div style={S.badgeStrong}>
+                      {rec?.best_mode ? String(rec.best_mode).toUpperCase() : '—'}
+                    </div>
+                  </div>
+                  <div style={S.recBody}>{rec?.mode_reason || 'Run analysis to generate a recommendation.'}</div>
+                  {!!rec?.best_mode && (
+                    <SecondaryButton
+                      onClick={() => {
+                        setActiveLayers([rec.best_mode])
+                        setTab('enhance')
+                        pushToast('ok', 'Pipeline updated', `Set to ${String(rec.best_mode).toUpperCase()}`)
                       }}
                     >
-                      {on ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-            {activeLayers.length > 1 && (
-              <div style={R.pipeline}>{activeLayers.join(' \u2192 ')}</div>
-            )}
-            <Btn
-              onClick={handleEnhance}
-              disabled={busy || !originalPath}
-              primary
-              style={{ marginTop: 6 }}
-            >
-              {busy && busyMsg === 'Enhancing' ? 'PROCESSING...' : 'RUN ENHANCE'}
-            </Btn>
-          </PH>
-        </div>
-
-        {/* Bottom pinned */}
-        <div style={R.bottomBar}>
-          {tempPath && (
-            <Btn onClick={handleSave} disabled={saving === true} full>
-              {saving === 'done' ? 'SAVED' : saving ? 'SAVING...' : 'SAVE AS...'}
-            </Btn>
-          )}
-        </div>
-      </div>
-
-      {/* ── CANVAS ── */}
-      <div style={R.canvas}>
-        {busy && (
-          <div style={R.busyOverlay}>
-            <div style={R.busyDot} />
-            <span style={R.busyText}>{busyMsg}...</span>
-          </div>
-        )}
-
-        {!originalPath && (
-          <div style={R.empty}>
-            <div style={R.emptyPill}>Ready for Intake</div>
-            <svg
-              width="56"
-              height="56"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#1a1a1e"
-              strokeWidth="1"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-            <div style={R.emptyTitle}>Upload an asset to start a processing workflow</div>
-            <div style={R.emptyHint}>Supports JPG, PNG, WebP, BMP and TIFF files up to 50MB</div>
-          </div>
-        )}
-
-        {originalPath && !resultPreview && (
-          <>
-            <img src={originalPreview} style={R.img} alt="" />
-            <div style={R.canvasTag}>ORIGINAL</div>
-          </>
-        )}
-
-        {originalPath && resultPreview && (
-          <>
-            <img src={holdOriginal ? originalPreview : originalPreview} style={R.img} alt="" />
-            {!holdOriginal && (
-              <img
-                src={resultPreview}
-                style={{
-                  ...R.img,
-                  clipPath: `polygon(0 0, ${splitPos}% 0, ${splitPos}% 100%, 0 100%)`
-                }}
-                alt=""
-              />
-            )}
-            {!holdOriginal && (
-              <>
-                <div style={{ ...R.splitLine, left: `${splitPos}%` }}>
-                  <div style={R.splitKnob}>
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#09090b"
-                      strokeWidth="3"
-                    >
-                      <path d="M9 4l-7 8 7 8" />
-                      <path d="M15 4l7 8-7 8" />
-                    </svg>
-                  </div>
+                      Apply Recommendation
+                    </SecondaryButton>
+                  )}
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={splitPos}
-                  onChange={(e) => setSplitPos(e.target.value)}
-                  style={R.splitSlider}
-                />
+              </Panel>
+            )}
+
+            {tab === 'export' && (
+              <Panel title="Export" subtitle="Save to disk and finalize output">
+                <FieldRow label="Result" value={resultLabel || (hasResult ? 'Ready' : '—')} mono />
+
+                <Divider />
+
+                <PrimaryButton onClick={handleSave} disabled={!tempPath || saving === true}>
+                  {saving === 'done' ? 'Saved' : saving ? 'Saving…' : 'Save As…'}
+                </PrimaryButton>
+
+                <SecondaryButton
+                  onClick={() => {
+                    setTab('enhance')
+                    pushToast('ok', 'Back', 'Adjust pipeline or enhance layers')
+                  }}
+                  disabled={!originalPath}
+                >
+                  Back to Enhance
+                </SecondaryButton>
+
+                <Divider />
+
+                <Hint>
+                  If the preview looks good, export. If not, switch to <b>Adjust</b> for fine tuning.
+                </Hint>
+              </Panel>
+            )}
+          </div>
+        </aside>
+
+        <main style={S.canvas}>
+          {busy ? <BusyOverlay label={busyMsg} /> : null}
+
+          {!originalPath ? (
+            <EmptyState onOpen={handleOpen} />
+          ) : (
+            <CompareCanvas
+              originalPreview={originalPreview}
+              resultPreview={resultPreview}
+              holdOriginal={holdOriginal}
+              splitPos={splitPos}
+              setSplitPos={setSplitPos}
+              hasResult={hasResult}
+              label={holdOriginal ? 'ORIGINAL' : hasResult ? 'RESULT' : 'ORIGINAL'}
+              resultLabel={resultLabel}
+              zoom={zoom}
+              fitMode={fitMode}
+            />
+          )}
+        </main>
+      </div>
+
+      {toast ? <Toast toast={toast} /> : null}
+    </div>
+  )
+}
+
+// ----------------------------
+// Components
+// ----------------------------
+function TopBar({
+  fileName,
+  status,
+  onOpen,
+  onAnalyze,
+  onEnhance,
+  onSave,
+  canAnalyze,
+  canEnhance,
+  canSave,
+  busy,
+  saving,
+  zoom,
+  setZoom,
+  fitMode,
+  setFitMode
+}) {
+  return (
+    <div style={S.topBar}>
+      <div style={S.topLeft}>
+        <div style={S.logoDot} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <div style={S.appTitle}>Enterprise Image Ops Console</div>
+          <div style={S.appSub}>
+            {fileName ? (
+              <>
+                <span style={{ opacity: 0.75 }}>Asset:</span> <span style={S.mono}>{fileName}</span>
               </>
+            ) : (
+              <span style={{ opacity: 0.75 }}>No asset loaded</span>
             )}
-            <div style={{ ...R.label, top: 12, left: 12 }}>
-              {holdOriginal ? 'ORIGINAL' : 'RESULT'}
-            </div>
-            {!holdOriginal && (
-              <div style={{ ...R.label, top: 12, right: 12, left: 'auto' }}>ORIGINAL</div>
-            )}
-            {resultLabel && <div style={R.resultTag}>{resultLabel.toUpperCase()}</div>}
-            <button
-              style={R.compareBtn}
-              onMouseDown={() => setHoldOriginal(true)}
-              onMouseUp={() => setHoldOriginal(false)}
-              onMouseLeave={() => setHoldOriginal(false)}
-            >
-              HOLD TO COMPARE
-            </button>
-          </>
-        )}
+          </div>
+        </div>
+      </div>
+
+      <div style={S.topRight}>
+        <StatusPill label={status.label} tone={status.tone} />
+
+        <div style={S.topActions}>
+          <SmallButton onClick={onOpen} title="Ctrl+O">
+            Open
+          </SmallButton>
+          <SmallButton onClick={onAnalyze} disabled={!canAnalyze} title="Analyze">
+            Analyze
+          </SmallButton>
+          <SmallButton onClick={onEnhance} disabled={!canEnhance} title="Enhance">
+            Enhance
+          </SmallButton>
+          <SmallButton onClick={onSave} disabled={!canSave} title="Ctrl+S">
+            {saving === 'done' ? 'Saved' : saving ? 'Saving…' : 'Save'}
+          </SmallButton>
+        </div>
+
+        <div style={S.viewGroup}>
+          <SmallChip onClick={() => setFitMode((m) => (m === 'contain' ? 'cover' : 'contain'))}>
+            Fit: {fitMode === 'contain' ? 'Contain' : 'Cover'}
+          </SmallChip>
+          <SmallChip onClick={() => setZoom((z) => clamp(round2(z + 0.1), 1, 2.2))}>Zoom +</SmallChip>
+          <SmallChip onClick={() => setZoom((z) => clamp(round2(z - 0.1), 1, 2.2))}>Zoom −</SmallChip>
+        </div>
+
+        <div style={{ opacity: 0.6, fontSize: 12, paddingLeft: 8 }}>
+          {busy ? 'Processing…' : ''}
+        </div>
       </div>
     </div>
   )
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// COMPONENTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function PH({ title, open, toggle, children }) {
+function TabRow({ tab, setTab }) {
   return (
-    <div style={{ marginBottom: 2 }}>
-      <button style={R.ph} onClick={toggle}>
-        <span>{title}</span>
-        <span style={{ color: '#2a2a2e', fontSize: 10 }}>{open ? '\u25BC' : '\u25B6'}</span>
-      </button>
-      {open && <div style={R.pb}>{children}</div>}
+    <div style={S.tabRow}>
+      {TABS.map((t) => {
+        const active = tab === t.id
+        return (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              ...S.tab,
+              ...(active ? S.tabActive : S.tabIdle)
+            }}
+          >
+            {t.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-function Btn({ children, onClick, disabled, accent, primary, full, style }) {
-  let bg = '#111114',
-    bd = '#1a1a1e',
-    fg = '#555'
-  if (accent) {
-    bg = '#0f1520'
-    bd = '#1a2a40'
-    fg = C.cyan
-  }
-  if (primary) {
-    bg = '#0a1628'
-    bd = '#1d3461'
-    fg = '#7db8f0'
-  }
+function Panel({ title, subtitle, children }) {
+  return (
+    <div style={S.panelInner}>
+      <div style={S.panelHead}>
+        <div>
+          <div style={S.panelTitle}>{title}</div>
+          <div style={S.panelSub}>{subtitle}</div>
+        </div>
+      </div>
+      <div style={S.panelBody}>{children}</div>
+    </div>
+  )
+}
+
+function Divider() {
+  return <div style={S.divider} />
+}
+
+function SectionTitle({ children }) {
+  return <div style={S.sectionTitle}>{children}</div>
+}
+
+function FieldRow({ label, value, mono }) {
+  return (
+    <div style={S.fieldRow}>
+      <div style={S.fieldLabel}>{label}</div>
+      <div style={{ ...S.fieldValue, ...(mono ? S.mono : null) }}>{value}</div>
+    </div>
+  )
+}
+
+function Hint({ children }) {
+  return <div style={S.hint}>{children}</div>
+}
+
+function K({ children }) {
+  return <span style={S.kbd}>{children}</span>
+}
+
+function ToggleRow({ label, value, onToggle, hint }) {
+  return (
+    <div style={S.toggleRow}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div style={S.toggleLabel}>{label}</div>
+        <div style={S.toggleHint}>{hint}</div>
+      </div>
+      <button onClick={onToggle} style={{ ...S.toggleBtn, ...(value ? S.toggleOn : S.toggleOff) }}>
+        {value ? 'ON' : 'OFF'}
+      </button>
+    </div>
+  )
+}
+
+function PrimaryButton({ children, onClick, disabled }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ ...S.btn, ...S.btnPrimary, ...(disabled ? S.btnDisabled : null) }}>
+      {children}
+    </button>
+  )
+}
+
+function SecondaryButton({ children, onClick, disabled }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ ...S.btn, ...S.btnSecondary, ...(disabled ? S.btnDisabled : null) }}>
+      {children}
+    </button>
+  )
+}
+
+function SmallButton({ children, onClick, disabled, title }) {
   return (
     <button
-      style={{
-        padding: '7px 0',
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.8px',
-        fontFamily: "'JetBrains Mono','SF Mono','Consolas',monospace",
-        backgroundColor: bg,
-        color: fg,
-        border: `1px solid ${bd}`,
-        borderRadius: 3,
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
-        width: full ? '100%' : 'auto',
-        transition: 'opacity 0.15s',
-        ...style
-      }}
+      title={title}
       onClick={onClick}
       disabled={disabled}
+      style={{ ...S.smallBtn, ...(disabled ? S.smallBtnDisabled : null) }}
     >
       {children}
     </button>
   )
 }
 
-function Sl({ l, v, min, max, step, set }) {
+function SmallChip({ children, onClick }) {
+  return (
+    <button onClick={onClick} style={S.smallChip}>
+      {children}
+    </button>
+  )
+}
+
+function StatusPill({ label, tone }) {
+  const palette = {
+    dim: { bg: 'rgba(148,163,184,0.12)', bd: 'rgba(148,163,184,0.25)', fg: '#94a3b8' },
+    cyan: { bg: 'rgba(59,130,246,0.14)', bd: 'rgba(59,130,246,0.30)', fg: '#93c5fd' },
+    amber: { bg: 'rgba(245,158,11,0.12)', bd: 'rgba(245,158,11,0.28)', fg: '#fcd34d' },
+    green: { bg: 'rgba(34,197,94,0.12)', bd: 'rgba(34,197,94,0.28)', fg: '#86efac' },
+    red: { bg: 'rgba(239,68,68,0.12)', bd: 'rgba(239,68,68,0.28)', fg: '#fca5a5' }
+  }[tone] || {
+    bg: 'rgba(148,163,184,0.12)',
+    bd: 'rgba(148,163,184,0.25)',
+    fg: '#94a3b8'
+  }
+
+  return (
+    <div style={{ ...S.pill, background: palette.bg, borderColor: palette.bd, color: palette.fg }}>
+      {label}
+    </div>
+  )
+}
+
+function Pills({ items, value, onChange }) {
+  return (
+    <div style={S.pills}>
+      {items.map((i) => {
+        const active = value === i.id
+        return (
+          <button
+            key={i.id}
+            onClick={() => onChange(i.id)}
+            style={{
+              ...S.pillBtn,
+              ...(active ? S.pillBtnOn : S.pillBtnOff)
+            }}
+          >
+            {i.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function Slider({ label, value, min, max, step, onChange }) {
   const isCenter = min < 0
-  const pct = ((v - min) / (max - min)) * 100
+  const pct = ((value - min) / (max - min)) * 100
   const cPct = isCenter ? ((0 - min) / (max - min)) * 100 : 0
   const left = isCenter ? Math.min(pct, cPct) : 0
   const width = isCenter ? Math.abs(pct - cPct) : pct
-  const display = step < 1 && step > 0 ? v.toFixed(2) : Math.round(v)
+  const display = step < 1 && step > 0 ? Number(value).toFixed(2) : Math.round(value)
 
   return (
-    <div style={R.slRow}>
-      <div style={R.slHead}>
-        <span style={R.slLabel}>{l}</span>
-        <span style={R.slVal}>{display}</span>
+    <div style={S.sliderRow}>
+      <div style={S.sliderHead}>
+        <div style={S.sliderLabel}>{label}</div>
+        <div style={S.sliderValue}>{display}</div>
       </div>
-      <div style={R.slTrack}>
-        <div style={R.slBg} />
-        <div style={{ ...R.slFill, left: `${left}%`, width: `${width}%` }} />
-        {isCenter && <div style={{ ...R.slCenter, left: `${cPct}%` }} />}
+
+      <div style={S.sliderTrack}>
+        <div style={S.sliderBg} />
+        <div style={{ ...S.sliderFill, left: `${left}%`, width: `${width}%` }} />
+        {isCenter ? <div style={{ ...S.sliderCenter, left: `${cPct}%` }} /> : null}
         <input
           type="range"
           min={min}
           max={max}
           step={step}
-          value={v}
-          onChange={(e) => set(parseFloat(e.target.value))}
-          onDoubleClick={() => set(isCenter ? 0 : min)}
-          style={R.slInput}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          onDoubleClick={() => onChange(isCenter ? 0 : min)}
+          style={S.sliderInput}
         />
       </div>
     </div>
   )
 }
 
-function MC({ l, v, c }) {
+function Metric({ label, value, tone }) {
+  const toneMap = {
+    dim: { fg: '#94a3b8', bd: 'rgba(148,163,184,0.18)', bg: 'rgba(2,6,23,0.28)' },
+    cyan: { fg: '#93c5fd', bd: 'rgba(59,130,246,0.25)', bg: 'rgba(59,130,246,0.08)' },
+    amber: { fg: '#fcd34d', bd: 'rgba(245,158,11,0.22)', bg: 'rgba(245,158,11,0.08)' },
+    green: { fg: '#86efac', bd: 'rgba(34,197,94,0.22)', bg: 'rgba(34,197,94,0.08)' },
+    red: { fg: '#fca5a5', bd: 'rgba(239,68,68,0.22)', bg: 'rgba(239,68,68,0.08)' }
+  }[tone || 'dim']
+
   return (
-    <div style={R.mc}>
-      <div style={R.mcL}>{l}</div>
-      <div style={{ ...R.mcV, color: c }}>{v}</div>
+    <div style={{ ...S.metric, borderColor: toneMap.bd, background: toneMap.bg }}>
+      <div style={S.metricLabel}>{label}</div>
+      <div style={{ ...S.metricValue, color: toneMap.fg }}>{value}</div>
     </div>
   )
 }
 
-const C = {
-  cyan: '#53a8ff',
-  amber: '#e7b35e',
-  red: '#ef6464',
-  green: '#59c48f',
-  dim: '#8792a2',
-  bg: '#0b1220',
-  sidebar: '#0f172a',
-  border: '#1e293b'
+function BusyOverlay({ label }) {
+  return (
+    <div style={S.busyOverlay}>
+      <div style={S.spinner} />
+      <div style={S.busyText}>{label || 'Working'}…</div>
+    </div>
+  )
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// STYLES
-// ═══════════════════════════════════════════════════════════════════════════════
+function EmptyState({ onOpen }) {
+  return (
+    <div style={S.empty}>
+      <div style={S.emptyPill}>Ready for Intake</div>
+      <div style={S.emptyTitle}>Load an image to begin</div>
+      <div style={S.emptySub}>JPG, PNG, WebP, BMP, TIFF · up to 50MB</div>
+      <div style={{ height: 12 }} />
+      <PrimaryButton onClick={onOpen}>Open Image</PrimaryButton>
+      <div style={{ height: 14 }} />
+      <div style={S.emptyFoot}>
+        <span style={{ opacity: 0.75 }}>Shortcut:</span> <K>Ctrl</K>+<K>O</K>
+      </div>
+    </div>
+  )
+}
 
-const R = {
-  root: {
-    display: 'flex',
+function CompareCanvas({
+  originalPreview,
+  resultPreview,
+  holdOriginal,
+  splitPos,
+  setSplitPos,
+  hasResult,
+  label,
+  resultLabel,
+  zoom,
+  fitMode
+}) {
+  // Spacebar hold forces original view
+  const showResult = hasResult && !holdOriginal
+
+  return (
+    <div style={S.canvasInner}>
+      {/* base original */}
+      <img
+        src={originalPreview}
+        alt=""
+        style={{
+          ...S.img,
+          objectFit: fitMode,
+          transform: `scale(${zoom})`
+        }}
+      />
+
+      {/* overlay result with wipe */}
+      {showResult ? (
+        <img
+          src={resultPreview}
+          alt=""
+          style={{
+            ...S.img,
+            objectFit: fitMode,
+            transform: `scale(${zoom})`,
+            clipPath: `polygon(0 0, ${splitPos}% 0, ${splitPos}% 100%, 0 100%)`
+          }}
+        />
+      ) : null}
+
+      {/* slider control */}
+      {showResult ? (
+        <>
+          <div style={{ ...S.splitLine, left: `${splitPos}%` }}>
+            <div style={S.splitKnob}>⇆</div>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={splitPos}
+            onChange={(e) => setSplitPos(Number(e.target.value))}
+            style={S.splitSlider}
+          />
+          <div style={{ ...S.tagLeft }}>RESULT</div>
+          <div style={{ ...S.tagRight }}>ORIGINAL</div>
+        </>
+      ) : (
+        <div style={{ ...S.tagLeft }}>{hasResult ? 'ORIGINAL (Hold Space)' : 'ORIGINAL'}</div>
+      )}
+
+      {/* bottom label */}
+      {resultLabel ? <div style={S.bottomTag}>{String(resultLabel).toUpperCase()}</div> : null}
+      <div style={S.helpTag}>
+        Hold <span style={S.helpKey}>Space</span> to compare · Drag split to wipe
+      </div>
+    </div>
+  )
+}
+
+function Toast({ toast }) {
+  const theme =
+    toast.type === 'ok'
+      ? { bd: 'rgba(34,197,94,0.30)', bg: 'rgba(34,197,94,0.10)', fg: '#86efac' }
+      : toast.type === 'error'
+        ? { bd: 'rgba(239,68,68,0.30)', bg: 'rgba(239,68,68,0.10)', fg: '#fca5a5' }
+        : { bd: 'rgba(59,130,246,0.30)', bg: 'rgba(59,130,246,0.10)', fg: '#93c5fd' }
+
+  return (
+    <div style={{ ...S.toast, borderColor: theme.bd, background: theme.bg }}>
+      <div style={{ fontWeight: 900, color: theme.fg }}>{toast.title}</div>
+      <div style={{ opacity: 0.9 }}>{toast.message}</div>
+    </div>
+  )
+}
+
+// ----------------------------
+// Helpers
+// ----------------------------
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n))
+}
+function round2(n) {
+  return Math.round(n * 100) / 100
+}
+function fileNameFromPath(p) {
+  try {
+    return String(p).split(/[/\\]/).pop()
+  } catch {
+    return String(p || '')
+  }
+}
+
+function toneNoise(v) {
+  if (v == null) return 'dim'
+  if (v > 15) return 'red'
+  if (v > 8) return 'amber'
+  return 'green'
+}
+function toneSharp(v) {
+  if (v == null) return 'dim'
+  if (v > 500) return 'green'
+  if (v > 100) return 'amber'
+  return 'red'
+}
+function toneRange(v) {
+  if (v == null) return 'dim'
+  if (v > 200) return 'green'
+  return 'amber'
+}
+function toneSkin(v) {
+  if (v == null) return 'dim'
+  if (v > 15) return 'cyan'
+  return 'dim'
+}
+
+// ----------------------------
+// Colors / Styles
+// ----------------------------
+const C = {
+  bg: '#070b14',
+  panel: '#0b1220',
+  panel2: '#0a1222',
+  canvas: '#070b14',
+  text: '#e5e7eb',
+  dim: '#94a3b8',
+  dim2: '#64748b',
+  line: 'rgba(148,163,184,0.14)',
+  line2: 'rgba(59,130,246,0.25)',
+  blue: '#60a5fa',
+  green: '#22c55e',
+  amber: '#f59e0b',
+  red: '#ef4444'
+}
+
+const S = {
+  app: {
     height: '100vh',
-    margin: 0,
-    fontFamily: "'JetBrains Mono','SF Mono','Consolas',monospace",
-    backgroundColor: C.bg,
-    color: '#888',
-    userSelect: 'none',
-    fontSize: 11
-  },
-  sidebar: {
-    width: 320,
-    minWidth: 320,
+    background: C.bg,
+    color: C.text,
+    fontFamily:
+      "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, 'Apple Color Emoji','Segoe UI Emoji'",
     display: 'flex',
     flexDirection: 'column',
-    backgroundColor: C.sidebar,
-    borderRight: `1px solid ${C.border}`,
-    paddingTop: 48
+    overflow: 'hidden'
   },
-  sideScroll: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '16px 14px 8px' },
 
-  brand: { display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0 14px' },
-  brandIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    flexShrink: 0,
-    boxShadow: '0 8px 24px rgba(30,64,175,0.35)',
-    background: `linear-gradient(135deg, ${C.cyan} 0%, #1d4ed8 100%)`
-  },
-  brandName: { fontSize: 13, fontWeight: 800, color: '#dbeafe', letterSpacing: '1.2px' },
-  brandSub: { fontSize: 8, color: '#8aa1c7', letterSpacing: '1.3px', textTransform: 'uppercase' },
-
-  sep: { height: 1, backgroundColor: C.border, margin: '8px 0' },
-
-  ph: {
+  topBar: {
+    height: 56,
     display: 'flex',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-    padding: '5px 1px',
-    background: 'none',
-    border: 'none',
-    color: '#3a3a3e',
-    cursor: 'pointer',
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '1.2px',
-    fontFamily: "'JetBrains Mono','SF Mono','Consolas',monospace"
+    padding: '0 14px',
+    borderBottom: `1px solid ${C.line}`,
+    background:
+      'linear-gradient(90deg, rgba(15,23,42,0.95), rgba(2,6,23,0.92))',
+    backdropFilter: 'blur(8px)'
   },
-  pb: { padding: '3px 0 4px' },
+  topLeft: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 },
+  logoDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    background: 'linear-gradient(135deg, #60a5fa, #2563eb)'
+  },
+  appTitle: { fontSize: 13, fontWeight: 900, letterSpacing: 0.2 },
+  appSub: { fontSize: 12, color: C.dim, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
 
-  fileInfo: { fontSize: 9, color: '#333', marginTop: 4, wordBreak: 'break-all', lineHeight: 1.4 },
-  fileDim: { fontSize: 9, color: '#222', marginTop: 1 },
-
-  diagBox: {
-    marginTop: 5,
-    padding: '6px 7px',
-    fontSize: 9,
-    lineHeight: 1.6,
-    color: '#556',
-    backgroundColor: '#0d0d10',
-    borderRadius: 3,
-    border: `1px solid ${C.border}`
-  },
-  mGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, marginTop: 5 },
-  mc: {
-    padding: '4px 6px',
-    backgroundColor: '#0d0d10',
-    borderRadius: 2,
-    border: `1px solid ${C.border}`
-  },
-  mcL: { fontSize: 8, color: '#2a2a2e', letterSpacing: '0.5px' },
-  mcV: { fontSize: 11, fontWeight: 800, marginTop: 1 },
-
-  recBox: {
-    marginTop: 5,
-    padding: '5px 7px',
-    backgroundColor: '#0a0e0a',
-    borderRadius: 3,
-    border: '1px solid #141a14'
-  },
-  recLbl: { fontSize: 8, color: '#333' },
-  recVal: { fontSize: 10, color: C.green, fontWeight: 800 },
-  recWhy: { fontSize: 8, color: '#2a3a2a', marginTop: 1 },
-
-  // Slider
-  slRow: { marginBottom: 8 },
-  slHead: { display: 'flex', justifyContent: 'space-between', marginBottom: 2 },
-  slLabel: { fontSize: 10, color: '#a09f9fff' },
-  slVal: { fontSize: 10, color: '#b8b6b6ff', fontWeight: 700 },
-  slTrack: { position: 'relative', height: 14, display: 'flex', alignItems: 'center' },
-  slBg: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: '#1a1a1e',
-    borderRadius: 1
-  },
-  slFill: { position: 'absolute', height: 2, backgroundColor: C.cyan, borderRadius: 1 },
-  slCenter: {
-    position: 'absolute',
-    width: 1,
-    height: 6,
-    backgroundColor: '#2a2a2e',
-    top: '50%',
-    transform: 'translateY(-50%)'
-  },
-  slInput: {
-    position: 'absolute',
-    width: '100%',
-    height: '100%',
-    margin: 0,
-    opacity: 0,
-    cursor: 'pointer',
-    zIndex: 2
-  },
-
-  adjBar: { display: 'flex', flexDirection: 'column', gap: 3, padding: '4px 0' },
-
-  // X-Ray
-  xrayRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 2, marginBottom: 6 },
-  xrayBtn: {
-    padding: '5px 2px',
-    fontSize: 9,
-    fontWeight: 600,
-    letterSpacing: '0.3px',
+  topRight: { display: 'flex', alignItems: 'center', gap: 10 },
+  pill: {
+    padding: '6px 10px',
+    borderRadius: 999,
     border: '1px solid',
-    borderRadius: 3,
-    cursor: 'pointer',
-    fontFamily: "'JetBrains Mono','SF Mono','Consolas',monospace",
-    background: 'none',
-    transition: 'all 0.1s'
+    fontSize: 12,
+    fontWeight: 800,
+    letterSpacing: 0.2
+  },
+  topActions: { display: 'flex', gap: 8, alignItems: 'center' },
+  smallBtn: {
+    height: 34,
+    padding: '0 12px',
+    borderRadius: 10,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.35)',
+    color: C.text,
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: 'pointer'
+  },
+  smallBtnDisabled: { opacity: 0.45, cursor: 'default' },
+
+  viewGroup: { display: 'flex', gap: 8, alignItems: 'center' },
+  smallChip: {
+    height: 34,
+    padding: '0 10px',
+    borderRadius: 10,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.20)',
+    color: C.dim,
+    fontSize: 12,
+    fontWeight: 800,
+    cursor: 'pointer'
   },
 
-  // Layers
-  layerCol: { display: 'flex', flexDirection: 'column', gap: 2 },
-  layerChip: {
+  bannerError: {
+    display: 'flex',
+    gap: 12,
+    alignItems: 'center',
+    padding: '10px 14px',
+    borderBottom: '1px solid rgba(239,68,68,0.25)',
+    background: 'rgba(239,68,68,0.10)',
+    color: '#fecaca'
+  },
+  bannerBtn: {
+    marginLeft: 'auto',
+    height: 30,
+    padding: '0 10px',
+    borderRadius: 10,
+    border: '1px solid rgba(239,68,68,0.25)',
+    background: 'rgba(2,6,23,0.20)',
+    color: '#fecaca',
+    fontWeight: 900,
+    cursor: 'pointer'
+  },
+
+  body: { display: 'flex', flex: 1, minHeight: 0 },
+
+  sidebar: {
+    width: 420,
+    borderRight: `1px solid ${C.line}`,
+    background: `linear-gradient(180deg, rgba(15,23,42,0.85), rgba(2,6,23,0.92))`,
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0
+  },
+  brand: {
+    padding: '14px 14px 10px',
     display: 'flex',
     alignItems: 'center',
-    gap: 6,
-    padding: '5px 6px',
-    border: '1px solid',
-    borderRadius: 3,
-    cursor: 'pointer',
+    gap: 12
+  },
+  brandIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    background: 'linear-gradient(135deg, rgba(96,165,250,1), rgba(37,99,235,1))',
+    boxShadow: '0 10px 25px rgba(37,99,235,0.25)'
+  },
+  brandTitle: { fontSize: 14, fontWeight: 950, letterSpacing: 0.3 },
+  brandSub: { fontSize: 12, color: C.dim2, fontWeight: 700 },
+
+  tabRow: {
+    padding: '0 10px 10px',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: 8
+  },
+  tab: {
+    height: 34,
+    borderRadius: 12,
+    border: `1px solid ${C.line}`,
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: 'pointer'
+  },
+  tabActive: {
+    background: 'linear-gradient(180deg, rgba(59,130,246,0.20), rgba(2,6,23,0.30))',
+    borderColor: 'rgba(59,130,246,0.30)',
+    color: '#bfdbfe'
+  },
+  tabIdle: {
+    background: 'rgba(2,6,23,0.18)',
+    color: C.dim
+  },
+
+  panel: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    padding: '0 10px 10px'
+  },
+  panelInner: {
+    height: '100%',
+    borderRadius: 18,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.25)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden'
+  },
+  panelHead: {
+    padding: '14px 14px 10px',
+    borderBottom: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.20)'
+  },
+  panelTitle: { fontSize: 14, fontWeight: 950 },
+  panelSub: { marginTop: 2, fontSize: 12, color: C.dim2, fontWeight: 700 },
+  panelBody: {
+    padding: 14,
+    overflowY: 'auto',
+    minHeight: 0
+  },
+
+  divider: {
+    height: 1,
+    background: C.line,
+    margin: '12px 0'
+  },
+
+  fieldRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 10,
+    padding: '6px 0'
+  },
+  fieldLabel: { fontSize: 12, color: C.dim2, fontWeight: 800 },
+  fieldValue: { fontSize: 12, color: C.text, fontWeight: 800, textAlign: 'right', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+
+  mono: {
+    fontFamily:
+      "'JetBrains Mono','SF Mono','Menlo','Consolas',monospace"
+  },
+
+  hint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: C.dim,
+    lineHeight: 1.5
+  },
+  kbd: {
+    display: 'inline-block',
+    padding: '2px 6px',
+    borderRadius: 8,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.25)',
+    fontSize: 12,
+    fontWeight: 900,
+    margin: '0 2px'
+  },
+
+  toggleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '8px 0'
+  },
+  toggleLabel: { fontSize: 12, fontWeight: 950 },
+  toggleHint: { fontSize: 12, color: C.dim2, fontWeight: 700 },
+  toggleBtn: {
+    height: 34,
+    padding: '0 12px',
+    borderRadius: 999,
+    border: `1px solid ${C.line}`,
+    fontWeight: 950,
+    cursor: 'pointer'
+  },
+  toggleOn: {
+    background: 'rgba(59,130,246,0.16)',
+    borderColor: 'rgba(59,130,246,0.30)',
+    color: '#bfdbfe'
+  },
+  toggleOff: {
+    background: 'rgba(2,6,23,0.20)',
+    color: C.dim
+  },
+
+  btn: {
     width: '100%',
-    background: 'none',
-    color: '#888',
-    fontSize: 11,
-    fontFamily: "'JetBrains Mono','SF Mono','Consolas',monospace",
-    transition: 'all 0.1s'
+    height: 40,
+    borderRadius: 14,
+    border: `1px solid ${C.line}`,
+    fontSize: 12,
+    fontWeight: 950,
+    cursor: 'pointer'
   },
-  layerIdx: { fontSize: 9, fontWeight: 800, width: 12, textAlign: 'center', flexShrink: 0 },
-  layerLbl: { flex: 1, textAlign: 'left', fontWeight: 500 },
-  layerBadge: {
-    fontSize: 8,
-    fontWeight: 800,
-    padding: '1px 5px',
-    borderRadius: 2,
-    letterSpacing: '0.5px'
+  btnPrimary: {
+    background: 'linear-gradient(180deg, rgba(59,130,246,0.22), rgba(2,6,23,0.28))',
+    borderColor: 'rgba(59,130,246,0.30)',
+    color: '#bfdbfe'
   },
-  pipeline: { marginTop: 4, fontSize: 9, color: C.cyan, opacity: 0.5 },
+  btnSecondary: {
+    background: 'rgba(2,6,23,0.20)',
+    color: C.dim
+  },
+  btnDisabled: { opacity: 0.5, cursor: 'default' },
 
-  bottomBar: { padding: '8px 12px', borderTop: `1px solid ${C.border}` },
+  sectionTitle: { marginTop: 6, marginBottom: 8, fontSize: 12, fontWeight: 950, color: '#cbd5e1' },
 
-  // Canvas
+  sliderRow: { marginBottom: 12 },
+  sliderHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
+  sliderLabel: { fontSize: 12, color: '#cbd5e1', fontWeight: 900 },
+  sliderValue: { fontSize: 12, color: C.dim, fontWeight: 900, ...({ fontVariantNumeric: 'tabular-nums' }) },
+
+  sliderTrack: { position: 'relative', height: 18, marginTop: 6, borderRadius: 10 },
+  sliderBg: { position: 'absolute', left: 0, right: 0, top: '50%', height: 3, transform: 'translateY(-50%)', background: 'rgba(148,163,184,0.18)', borderRadius: 10 },
+  sliderFill: { position: 'absolute', top: '50%', height: 3, transform: 'translateY(-50%)', background: 'rgba(96,165,250,0.95)', borderRadius: 10 },
+  sliderCenter: { position: 'absolute', top: '50%', width: 2, height: 10, transform: 'translateY(-50%)', background: 'rgba(148,163,184,0.55)', borderRadius: 10 },
+  sliderInput: { position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' },
+
+  pills: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  pillBtn: {
+    height: 34,
+    padding: '0 12px',
+    borderRadius: 999,
+    border: `1px solid ${C.line}`,
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: 'pointer'
+  },
+  pillBtnOn: {
+    background: 'rgba(59,130,246,0.16)',
+    borderColor: 'rgba(59,130,246,0.30)',
+    color: '#bfdbfe'
+  },
+  pillBtnOff: {
+    background: 'rgba(2,6,23,0.20)',
+    color: C.dim
+  },
+
+  layerGrid: { display: 'grid', gridTemplateColumns: '1fr', gap: 10 },
+  layerCard: {
+    width: '100%',
+    borderRadius: 16,
+    border: `1px solid ${C.line}`,
+    padding: 12,
+    cursor: 'pointer',
+    textAlign: 'left'
+  },
+  layerTop: { display: 'flex', gap: 12, alignItems: 'flex-start' },
+  layerIdx: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.28)',
+    fontWeight: 950,
+    color: C.dim
+  },
+  layerName: { fontWeight: 950, fontSize: 13 },
+  layerDesc: { marginTop: 4, fontSize: 12, color: C.dim2, fontWeight: 700, lineHeight: 1.35 },
+
+  badge: {
+    marginLeft: 'auto',
+    height: 28,
+    padding: '0 10px',
+    borderRadius: 999,
+    display: 'flex',
+    alignItems: 'center',
+    border: `1px solid ${C.line}`,
+    fontSize: 12,
+    fontWeight: 950
+  },
+  badgeOn: { background: 'rgba(34,197,94,0.12)', borderColor: 'rgba(34,197,94,0.24)', color: '#86efac' },
+  badgeOff: { background: 'rgba(148,163,184,0.10)', borderColor: 'rgba(148,163,184,0.18)', color: C.dim },
+  badgeStrong: {
+    height: 30,
+    padding: '0 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(59,130,246,0.30)',
+    background: 'rgba(59,130,246,0.14)',
+    color: '#bfdbfe',
+    fontWeight: 950,
+    display: 'flex',
+    alignItems: 'center'
+  },
+
+  metricGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
+  metric: { padding: 12, borderRadius: 16, border: `1px solid ${C.line}` },
+  metricLabel: { fontSize: 12, color: C.dim2, fontWeight: 900 },
+  metricValue: { marginTop: 6, fontSize: 16, fontWeight: 950, letterSpacing: 0.2 },
+
+  recCard: {
+    borderRadius: 18,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.25)',
+    padding: 14
+  },
+  recHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  recTitle: { fontSize: 12, color: C.dim2, fontWeight: 950, letterSpacing: 0.2 },
+  recBody: { marginTop: 10, fontSize: 12, color: C.dim, lineHeight: 1.5, fontWeight: 700 },
+
   canvas: {
     flex: 1,
+    minWidth: 0,
+    background:
+      'radial-gradient(circle at 20% 10%, rgba(59,130,246,0.18) 0%, rgba(2,6,23,0.92) 45%, rgba(2,6,23,1) 100%)',
     position: 'relative',
-    paddingTop: 48,
-    overflow: 'hidden',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    background: 'radial-gradient(circle at 30% 10%, #13203a 0%, #0b1220 45%, #090f1b 100%)'
+    overflow: 'hidden'
   },
-  topBar: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 48,
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '0 18px',
-    borderBottom: `1px solid ${C.border}`,
-    color: '#d8e4ff',
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: '0.6px',
-    background: 'linear-gradient(90deg,#0f172a,#182a4a)'
-  },
-  topTitleWrap: { display: 'flex', flexDirection: 'column', gap: 2 },
-  topSubTitle: { fontSize: 9, color: '#94a3b8', fontWeight: 500, letterSpacing: '0.4px' },
-  topMeta: { fontSize: 10, color: '#bfdbfe', fontWeight: 700 },
-  errorBanner: {
-    position: 'fixed',
-    top: 48,
-    left: 0,
-    right: 0,
-    zIndex: 40,
-    padding: '10px 18px',
-    color: '#fecaca',
-    backgroundColor: 'rgba(127,29,29,0.35)',
-    borderBottom: '1px solid rgba(239,68,68,0.35)',
-    fontSize: 12
-  },
-  topBar: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 48,
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '0 18px',
-    borderBottom: `1px solid ${C.border}`,
-    color: '#d8e4ff',
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: '0.6px',
-    background: 'linear-gradient(90deg,#0f172a,#111c33)'
-  },
-  topMeta: { fontSize: 10, color: '#94a3b8', fontWeight: 600 },
-  errorBanner: {
-    position: 'fixed',
-    top: 48,
-    left: 0,
-    right: 0,
-    zIndex: 40,
-    padding: '10px 18px',
-    color: '#fecaca',
-    backgroundColor: 'rgba(127,29,29,0.35)',
-    borderBottom: '1px solid rgba(239,68,68,0.35)',
-    fontSize: 12
-  },
-  img: { position: 'absolute', width: '100%', height: '100%', objectFit: 'contain' },
+  canvasInner: { position: 'absolute', inset: 0 },
 
-  busyOverlay: {
+  img: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(9,9,11,0.6)',
-    zIndex: 20,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10
-  },
-  busyDot: {
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    backgroundColor: C.cyan,
-    animation: 'pulse 1s infinite'
-  },
-  busyText: { fontSize: 11, color: '#555', letterSpacing: '1px' },
-
-  empty: { textAlign: 'center', maxWidth: 560, padding: 30 },
-  emptyPill: {
-    display: 'inline-block',
-    marginBottom: 14,
-    fontSize: 10,
-    padding: '4px 10px',
-    borderRadius: 999,
-    color: '#bfdbfe',
-    border: '1px solid rgba(147,197,253,0.35)',
-    backgroundColor: 'rgba(59,130,246,0.14)',
-    letterSpacing: '0.7px'
-  },
-  emptyTitle: {
-    fontSize: 20,
-    color: '#dbeafe',
-    marginTop: 14,
-    letterSpacing: '0.2px',
-    fontWeight: 700
-  },
-  emptyHint: { fontSize: 12, color: '#93a7c5', marginTop: 8 },
-
-  canvasTag: {
-    position: 'absolute',
-    bottom: 14,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    fontSize: 9,
-    color: '#333',
-    backgroundColor: 'rgba(9,9,11,0.8)',
-    padding: '3px 10px',
-    borderRadius: 2,
-    border: `1px solid ${C.border}`,
-    letterSpacing: '1px'
+    inset: 0,
+    width: '100%',
+    height: '100%'
   },
 
   splitLine: {
     position: 'absolute',
     top: 0,
     bottom: 0,
-    width: 1,
-    backgroundColor: 'rgba(255,255,255,0.5)',
+    width: 2,
+    background: 'rgba(255,255,255,0.45)',
     transform: 'translateX(-50%)',
-    pointerEvents: 'none',
-    zIndex: 5
+    pointerEvents: 'none'
   },
   splitKnob: {
     position: 'absolute',
     top: '50%',
     left: '50%',
     transform: 'translate(-50%,-50%)',
-    width: 30,
-    height: 30,
-    backgroundColor: '#fff',
-    borderRadius: '50%',
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    background: 'rgba(255,255,255,0.92)',
+    color: '#0b1220',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.6)'
+    fontWeight: 950,
+    boxShadow: '0 10px 25px rgba(0,0,0,0.35)'
   },
   splitSlider: {
     position: 'absolute',
+    inset: 0,
     width: '100%',
     height: '100%',
-    top: 0,
-    left: 0,
-    margin: 0,
-    zIndex: 10,
-    cursor: 'ew-resize',
-    opacity: 0
+    opacity: 0,
+    cursor: 'ew-resize'
   },
-  label: {
+
+  tagLeft: {
     position: 'absolute',
-    zIndex: 4,
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '1px',
-    padding: '3px 8px',
-    borderRadius: 2,
-    backgroundColor: 'rgba(9,9,11,0.7)',
-    color: '#555',
-    border: `1px solid ${C.border}`
+    top: 14,
+    left: 14,
+    padding: '6px 10px',
+    borderRadius: 999,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.35)',
+    fontWeight: 950,
+    fontSize: 12,
+    color: '#cbd5e1'
   },
-  resultTag: {
+  tagRight: {
     position: 'absolute',
-    bottom: 14,
+    top: 14,
+    right: 14,
+    padding: '6px 10px',
+    borderRadius: 999,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.35)',
+    fontWeight: 950,
+    fontSize: 12,
+    color: '#cbd5e1'
+  },
+  bottomTag: {
+    position: 'absolute',
+    bottom: 18,
     left: '50%',
     transform: 'translateX(-50%)',
-    zIndex: 4,
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '1px',
-    padding: '3px 10px',
-    borderRadius: 2,
-    backgroundColor: 'rgba(10,22,40,0.85)',
-    color: C.cyan,
-    border: '1px solid #1d3461'
+    padding: '6px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(59,130,246,0.30)',
+    background: 'rgba(59,130,246,0.14)',
+    color: '#bfdbfe',
+    fontWeight: 950,
+    fontSize: 12,
+    letterSpacing: 0.3
   },
-  compareBtn: {
+  helpTag: {
     position: 'absolute',
-    bottom: 14,
-    right: 14,
-    zIndex: 11,
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: '0.8px',
-    color: '#333',
-    backgroundColor: 'rgba(11,11,14,0.9)',
-    padding: '5px 10px',
-    borderRadius: 2,
-    border: `1px solid ${C.border}`,
-    cursor: 'pointer',
-    fontFamily: "'JetBrains Mono','SF Mono','Consolas',monospace"
+    bottom: 18,
+    right: 18,
+    padding: '6px 12px',
+    borderRadius: 999,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.35)',
+    color: C.dim,
+    fontWeight: 800,
+    fontSize: 12
+  },
+  helpKey: {
+    padding: '1px 8px',
+    borderRadius: 999,
+    border: `1px solid ${C.line}`,
+    background: 'rgba(2,6,23,0.25)',
+    fontWeight: 950,
+    color: '#cbd5e1'
+  },
+
+  busyOverlay: {
+    position: 'absolute',
+    inset: 0,
+    background: 'rgba(2,6,23,0.55)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    zIndex: 10
+  },
+  spinner: {
+    width: 14,
+    height: 14,
+    borderRadius: 999,
+    border: '2px solid rgba(255,255,255,0.20)',
+    borderTopColor: 'rgba(255,255,255,0.75)',
+    animation: 'spin 0.9s linear infinite'
+  },
+  busyText: { fontSize: 13, fontWeight: 900, color: '#cbd5e1' },
+
+  empty: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 20,
+    textAlign: 'center'
+  },
+  emptyPill: {
+    padding: '6px 12px',
+    borderRadius: 999,
+    border: '1px solid rgba(59,130,246,0.30)',
+    background: 'rgba(59,130,246,0.12)',
+    color: '#bfdbfe',
+    fontWeight: 950,
+    fontSize: 12
+  },
+  emptyTitle: { marginTop: 8, fontSize: 24, fontWeight: 950, letterSpacing: 0.2 },
+  emptySub: { fontSize: 13, color: C.dim, fontWeight: 800 },
+  emptyFoot: { fontSize: 12, color: C.dim, fontWeight: 800 },
+
+  toast: {
+    position: 'fixed',
+    bottom: 16,
+    left: 16,
+    width: 360,
+    borderRadius: 16,
+    border: `1px solid ${C.line}`,
+    padding: 12,
+    background: 'rgba(2,6,23,0.35)',
+    zIndex: 999,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    boxShadow: '0 18px 45px rgba(0,0,0,0.35)'
   }
 }
 
-export default App
+// Add keyframes via inline <style> once (safe)
+if (typeof document !== 'undefined' && !document.getElementById('__aurora_styles')) {
+  const el = document.createElement('style')
+  el.id = '__aurora_styles'
+  el.textContent = `
+    @keyframes spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+  `
+  document.head.appendChild(el)
+}
