@@ -19,7 +19,7 @@ const ALLOWED_XRAY_MODES = new Set([
   'bright',
   'occlusion'
 ])
-const MAX_IMAGE_SIZE_BYTES = 50 * 1024 * 1024
+const MAX_IMAGE_SIZE_BYTES = 500 * 1024 * 1024
 const ENGINE_TIMEOUT_MS = 30_000
 
 function getMime(p) {
@@ -135,7 +135,21 @@ function callEngine(command) {
     })
   })
 }
+function preloadPath() {
+  const candidates = [
+    join(__dirname, '../preload/index.js'),
+    join(__dirname, '../preload/index.mjs'),
+    join(__dirname, '../preload/index.cjs'),
+    join(__dirname, '../preload/index') // just in case
+  ]
 
+  console.log('[main] __dirname:', __dirname)
+  console.log('[main] preload candidates:\n' + candidates.join('\n'))
+
+  const found = candidates.find((p) => fs.existsSync(p))
+  console.log('[main] preload selected:', found || 'NONE FOUND')
+  return found || candidates[0]
+}
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1400,
@@ -146,13 +160,13 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#09090b',
     ...(process.platform === 'linux' ? { icon } : {}),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true,
-      nodeIntegration: false
-    }
+webPreferences: {
+  preload: preloadPath(),
+  contextIsolation: true,
+  sandbox: false,
+  nodeIntegration: false,
+  webSecurity: true
+}
   })
   mainWindow.on('ready-to-show', () => mainWindow.show())
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -170,20 +184,34 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, w) => optimizer.watchWindowShortcuts(w))
 
-  // ─── File Picker ───
-  ipcMain.handle('dialog:openFile', async () => {
-    try {
-      const { canceled, filePaths } = await dialog.showOpenDialog({
+// ─── File Picker ───
+ipcMain.handle('dialog:openFile', async (event) => {
+  try {
+    // safest parent resolution (works even with multiple windows)
+    const win = BrowserWindow.fromWebContents(event.sender) || BrowserWindow.getFocusedWindow()
+
+    // On some WMs, focusing before opening helps ensure it appears on top
+    if (win && !win.isDestroyed()) win.focus()
+
+    const { canceled, filePaths } = await dialog.showOpenDialog(
+      win && !win.isDestroyed() ? win : undefined,
+      {
         properties: ['openFile'],
         filters: [{ name: 'Images', extensions: ['jpg', 'png', 'jpeg', 'webp', 'bmp', 'tiff'] }]
-      })
-      if (canceled) return null
-      if (!isValidImagePath(filePaths[0])) return { error: 'Unsupported, missing, or too large image file' }
-      return { path: filePaths[0], preview: toBase64(filePaths[0]) }
-    } catch (error) {
-      return { error: `Failed to open image: ${error.message}` }
+      }
+    )
+
+    if (canceled) return null
+
+    if (!isValidImagePath(filePaths[0])) {
+      return { error: 'Unsupported, missing, or too large image file' }
     }
-  })
+
+    return { path: filePaths[0], preview: toBase64(filePaths[0]) }
+  } catch (error) {
+    return { error: `Backend Error: ${error.message}` }
+  }
+})
 
   // ─── Analyze ───
   ipcMain.handle('run-autopilot', async (_e, imagePath) => {

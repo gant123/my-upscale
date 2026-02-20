@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-
+console.log('[preload] booted ✅', {
+  contextIsolated: process.contextIsolated,
+  hasContextBridge: typeof require !== 'undefined' ? 'maybe' : 'n/a'
+})
 const api = {
   selectImage: () => ipcRenderer.invoke('dialog:openFile'),
   runAutopilot: (imagePath) => ipcRenderer.invoke('run-autopilot', imagePath),
@@ -13,6 +16,7 @@ if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
+    contextBridge.exposeInMainWorld('__preload_ok', true)
   } catch (error) {
     console.error(error)
   }

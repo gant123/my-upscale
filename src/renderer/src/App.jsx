@@ -72,7 +72,10 @@ const App = () => {
     xray: false,
     layers: true
   })
-
+useEffect(() => {
+  console.log('__preload_ok:', window.__preload_ok)
+  console.log('window.api:', window.api)
+}, [])
   const togglePanel = (k) => setPanels((p) => ({ ...p, [k]: !p[k] }))
   const setA = (k, v) => setAdj((p) => ({ ...p, [k]: v }))
   const toggleLayer = (id) =>
@@ -98,15 +101,21 @@ const App = () => {
     return () => window.clearTimeout(timer)
   }, [adj, dirty, originalPath])
 
-  const handleOpen = useCallback(async () => {
-    const f = await window.api.selectImage()
-    if (!f) return
-    if (f.error) {
-      setUiError(f.error)
+const handleOpen = useCallback(async () => {
+  try {
+    console.log('window.api:', window.api)
+
+    if (!window.api || !window.api.selectImage) {
+      alert(
+        'window.api is missing. Preload did not expose API. Check preload path + contextBridge.'
+      )
       return
     }
 
-    setUiError('')
+    const f = await window.api.selectImage()
+    if (!f) return
+    if (f.error) return alert('Could not load image: ' + f.error)
+
     setOriginalPath(f.path)
     setOriginalPreview(f.preview)
     setResultPreview(null)
@@ -116,7 +125,13 @@ const App = () => {
     setMetrics(null)
     setRec(null)
     setAdj({ ...DEFAULTS })
-  }, [])
+  } catch (err) {
+    console.error('Error selecting image:', err)
+    alert('Frontend Error: ' + err.message)
+  }
+}, [])
+
+
 
   const handleAnalyze = useCallback(async () => {
     if (!originalPath) return
