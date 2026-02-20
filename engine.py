@@ -56,6 +56,13 @@ def cmd_analyze(data):
 
     avg_b = float(np.mean(v))
     avg_s = float(np.mean(s))
+    local_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    gradient = cv2.magnitude(cv2.Sobel(gray, cv2.CV_32F, 1, 0, 3), cv2.Sobel(gray, cv2.CV_32F, 0, 1, 3))
+    grad_mean = float(np.mean(gradient))
+
+    translucent_hint = round(max(0.0, min(1.0, ((avg_b - 110.0) / 120.0) + ((65.0 - avg_s) / 85.0))) * 100.0, 2)
+    fabric_hint = round(max(0.0, min(1.0, ((90.0 - avg_s) / 90.0) + ((local_var - 40.0) / 160.0))) * 100.0, 2)
+    occlusion_hint = round(max(0.0, min(1.0, ((80.0 - grad_mean) / 80.0) + ((avg_b - 95.0) / 120.0))) * 100.0, 2)
 
     # Recommendations
     if avg_b < 60: exp = round(min(2.0, (110 - avg_b) / 70.0), 2)
@@ -70,6 +77,28 @@ def cmd_analyze(data):
     elif avg_b < 70 and noise < 10: best, reason = "light", "Dark but clean"
     elif skin_pct > 15: best, reason = "portrait", "Skin detected"
     else: best, reason = "pro", "Balanced"
+
+    xray_modes = []
+    if translucent_hint >= 45:
+        xray_modes.append({
+            "mode": "occlusion",
+            "confidence": translucent_hint,
+            "reason": "Likely translucent surfaces (plastic/glass)."
+        })
+    if fabric_hint >= 40:
+        xray_modes.append({
+            "mode": "reveal",
+            "confidence": fabric_hint,
+            "reason": "Low-chroma textured regions may hide under-layer detail."
+        })
+    if occlusion_hint >= 35:
+        xray_modes.append({
+            "mode": "frequency",
+            "confidence": occlusion_hint,
+            "reason": "Frequency split can surface faint outlines under coverings."
+        })
+    if not xray_modes:
+        xray_modes.append({"mode": "structure", "confidence": 30.0, "reason": "General edge baseline."})
 
     # Diagnosis text
     lines = []
@@ -99,6 +128,7 @@ def cmd_analyze(data):
         "recommendations": {
             "exposure": exp, "saturation": sat_adj,
             "best_mode": best, "mode_reason": reason,
+            "xray_modes": xray_modes,
         }
     }
 
@@ -407,6 +437,16 @@ def xray_bright(img):
     # 6. Apply a cool color map (OCEAN gives a crisp, icy blue look to contrast the hot glare)
     return cv2.applyColorMap(sharp, cv2.COLORMAP_OCEAN)    
 
+def xray_occlusion(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    base = cv2.GaussianBlur(gray, (0, 0), 9)
+    detail = cv2.subtract(gray, cv2.GaussianBlur(gray, (0, 0), 2))
+    lifted = cv2.normalize(base.astype(np.float64) * 0.7 + detail.astype(np.float64) * 2.2, None, 0, 255, cv2.NORM_MINMAX)
+    clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8)).apply(lifted.astype(np.uint8))
+    edges = cv2.Canny(clahe, 40, 120)
+    merged = np.clip(clahe.astype(np.float64) * 0.75 + edges.astype(np.float64) * 0.95, 0, 255).astype(np.uint8)
+    return cv2.applyColorMap(merged, cv2.COLORMAP_TURBO)
+
 XRAY_MAP = {
     "structure": xray_structure,
     "depth": xray_depth,
@@ -415,6 +455,7 @@ XRAY_MAP = {
     "bones": xray_bones,
     "reveal": xray_reveal,
     "bright": xray_bright,
+    "occlusion": xray_occlusion,
 }
 
 
