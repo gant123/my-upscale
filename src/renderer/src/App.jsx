@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 const ENHANCE_MODES = [
   { id: 'pro', label: 'Pro Detail' },
@@ -47,7 +47,6 @@ const App = () => {
   const [tempPath, setTempPath] = useState(null)
   const [resultLabel, setResultLabel] = useState('')
   const [uiError, setUiError] = useState('')
-  const localFileRef = useRef(null)
 
   const [busy, setBusy] = useState(false)
   const [busyMsg, setBusyMsg] = useState('')
@@ -100,75 +99,23 @@ const App = () => {
   }, [adj, dirty, originalPath])
 
   const handleOpen = useCallback(async () => {
-    const applyLoadedImage = (pathValue, previewValue) => {
-      setUiError('')
-      setOriginalPath(pathValue)
-      setOriginalPreview(previewValue)
-      setResultPreview(null)
-      setTempPath(null)
-      setResultLabel('')
-      setDiagnosis(null)
-      setMetrics(null)
-      setRec(null)
-      setAdj({ ...DEFAULTS })
-    }
-
-    try {
-      if (!window.api?.selectImage) {
-        localFileRef.current?.click()
-        return
-      }
-
-      const f = await window.api.selectImage()
-      if (!f) return
-      if (f.error) {
-        setUiError(f.error)
-        localFileRef.current?.click()
-        return
-      }
-
-      if (!f.path || !f.preview) {
-        setUiError('Image picker returned an invalid response.')
-        localFileRef.current?.click()
-        return
-      }
-
-      applyLoadedImage(f.path, f.preview)
-    } catch (error) {
-      setUiError(`Open image failed: ${error.message}`)
-      localFileRef.current?.click()
-    }
-  }, [])
-
-  const handleLocalFileChange = useCallback((event) => {
-    const [file] = event.target.files || []
-    if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setUiError('Please select a valid image file.')
+    const f = await window.api.selectImage()
+    if (!f) return
+    if (f.error) {
+      setUiError(f.error)
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      const preview = typeof reader.result === 'string' ? reader.result : null
-      if (!preview) {
-        setUiError('Unable to preview selected image.')
-        return
-      }
-      setUiError('')
-      setOriginalPath(file.name)
-      setOriginalPreview(preview)
-      setResultPreview(null)
-      setTempPath(null)
-      setResultLabel('')
-      setDiagnosis(null)
-      setMetrics(null)
-      setRec(null)
-      setAdj({ ...DEFAULTS })
-    }
-    reader.onerror = () => setUiError('Unable to read selected image.')
-    reader.readAsDataURL(file)
-    event.target.value = ''
+    setUiError('')
+    setOriginalPath(f.path)
+    setOriginalPreview(f.preview)
+    setResultPreview(null)
+    setTempPath(null)
+    setResultLabel('')
+    setDiagnosis(null)
+    setMetrics(null)
+    setRec(null)
+    setAdj({ ...DEFAULTS })
   }, [])
 
   const handleAnalyze = useCallback(async () => {
@@ -251,19 +198,8 @@ const App = () => {
   // ════════════════════════════════════════════════════════════════════
   return (
     <div style={R.root}>
-      <input
-        ref={localFileRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff"
-        style={{ display: 'none' }}
-        onChange={handleLocalFileChange}
-      />
-
       <div style={R.topBar}>
-        <div style={R.topTitleWrap}>
-          <div>Enterprise Image Ops Console</div>
-          <div style={R.topSubTitle}>A high-trust workflow for image enhancement operations</div>
-        </div>
+        <div>Enterprise Image Ops Console</div>
         <div style={R.topMeta}>
           {originalPath ? 'Secure Session Active' : 'Awaiting asset upload'}
         </div>
@@ -597,9 +533,6 @@ const App = () => {
             </svg>
             <div style={R.emptyTitle}>Upload an asset to start a processing workflow</div>
             <div style={R.emptyHint}>Supports JPG, PNG, WebP, BMP and TIFF files up to 50MB</div>
-            <Btn onClick={handleOpen} primary style={{ marginTop: 14, width: 240 }}>
-              SELECT IMAGE ASSET
-            </Btn>
           </div>
         )}
 
@@ -797,11 +730,11 @@ const R = {
     fontSize: 11
   },
   sidebar: {
-    width: 340,
-    minWidth: 340,
+    width: 320,
+    minWidth: 320,
     display: 'flex',
     flexDirection: 'column',
-    background: 'linear-gradient(180deg,#0f172a 0%, #0b1220 100%)',
+    backgroundColor: C.sidebar,
     borderRight: `1px solid ${C.border}`,
     paddingTop: 48
   },
@@ -983,6 +916,36 @@ const R = {
   topTitleWrap: { display: 'flex', flexDirection: 'column', gap: 2 },
   topSubTitle: { fontSize: 9, color: '#94a3b8', fontWeight: 500, letterSpacing: '0.4px' },
   topMeta: { fontSize: 10, color: '#bfdbfe', fontWeight: 700 },
+  errorBanner: {
+    position: 'fixed',
+    top: 48,
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    padding: '10px 18px',
+    color: '#fecaca',
+    backgroundColor: 'rgba(127,29,29,0.35)',
+    borderBottom: '1px solid rgba(239,68,68,0.35)',
+    fontSize: 12
+  },
+  topBar: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 48,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0 18px',
+    borderBottom: `1px solid ${C.border}`,
+    color: '#d8e4ff',
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: '0.6px',
+    background: 'linear-gradient(90deg,#0f172a,#111c33)'
+  },
+  topMeta: { fontSize: 10, color: '#94a3b8', fontWeight: 600 },
   errorBanner: {
     position: 'fixed',
     top: 48,
