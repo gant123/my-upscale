@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 const ENHANCE_MODES = [
   { id: 'pro', label: 'Pro Detail' },
@@ -46,6 +46,8 @@ const App = () => {
   const [resultPreview, setResultPreview] = useState(null)
   const [tempPath, setTempPath] = useState(null)
   const [resultLabel, setResultLabel] = useState('')
+  const [uiError, setUiError] = useState('')
+  const localFileRef = useRef(null)
 
   const [busy, setBusy] = useState(false)
   const [busyMsg, setBusyMsg] = useState('')
@@ -98,21 +100,80 @@ const App = () => {
   }, [adj, dirty, originalPath])
 
   const handleOpen = useCallback(async () => {
-    const f = await window.api.selectImage()
-    if (!f) return
-    setOriginalPath(f.path)
-    setOriginalPreview(f.preview)
-    setResultPreview(null)
-    setTempPath(null)
-    setResultLabel('')
-    setDiagnosis(null)
-    setMetrics(null)
-    setRec(null)
-    setAdj({ ...DEFAULTS })
+    const applyLoadedImage = (pathValue, previewValue) => {
+      setUiError('')
+      setOriginalPath(pathValue)
+      setOriginalPreview(previewValue)
+      setResultPreview(null)
+      setTempPath(null)
+      setResultLabel('')
+      setDiagnosis(null)
+      setMetrics(null)
+      setRec(null)
+      setAdj({ ...DEFAULTS })
+    }
+
+    try {
+      if (!window.api?.selectImage) {
+        localFileRef.current?.click()
+        return
+      }
+
+      const f = await window.api.selectImage()
+      if (!f) return
+      if (f.error) {
+        setUiError(f.error)
+        localFileRef.current?.click()
+        return
+      }
+
+      if (!f.path || !f.preview) {
+        setUiError('Image picker returned an invalid response.')
+        localFileRef.current?.click()
+        return
+      }
+
+      applyLoadedImage(f.path, f.preview)
+    } catch (error) {
+      setUiError(`Open image failed: ${error.message}`)
+      localFileRef.current?.click()
+    }
+  }, [])
+
+  const handleLocalFileChange = useCallback((event) => {
+    const [file] = event.target.files || []
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setUiError('Please select a valid image file.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const preview = typeof reader.result === 'string' ? reader.result : null
+      if (!preview) {
+        setUiError('Unable to preview selected image.')
+        return
+      }
+      setUiError('')
+      setOriginalPath(file.name)
+      setOriginalPreview(preview)
+      setResultPreview(null)
+      setTempPath(null)
+      setResultLabel('')
+      setDiagnosis(null)
+      setMetrics(null)
+      setRec(null)
+      setAdj({ ...DEFAULTS })
+    }
+    reader.onerror = () => setUiError('Unable to read selected image.')
+    reader.readAsDataURL(file)
+    event.target.value = ''
   }, [])
 
   const handleAnalyze = useCallback(async () => {
     if (!originalPath) return
+    setUiError('')
     setBusy(true)
     setBusyMsg('Analyzing')
     try {
@@ -136,6 +197,7 @@ const App = () => {
 
   const handleApply = useCallback(async () => {
     if (!originalPath || !dirty) return
+    setUiError('')
     setBusy(true)
     setBusyMsg('Adjusting')
     try {
@@ -152,6 +214,7 @@ const App = () => {
 
   const handleEnhance = useCallback(async () => {
     if (!originalPath) return
+    setUiError('')
     setBusy(true)
     setBusyMsg('Enhancing')
     try {
@@ -188,6 +251,26 @@ const App = () => {
   // ════════════════════════════════════════════════════════════════════
   return (
     <div style={R.root}>
+      <input
+        ref={localFileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff"
+        style={{ display: 'none' }}
+        onChange={handleLocalFileChange}
+      />
+
+      <div style={R.topBar}>
+        <div style={R.topTitleWrap}>
+          <div>Enterprise Image Ops Console</div>
+          <div style={R.topSubTitle}>A high-trust workflow for image enhancement operations</div>
+        </div>
+        <div style={R.topMeta}>
+          {originalPath ? 'Secure Session Active' : 'Awaiting asset upload'}
+        </div>
+      </div>
+
+      {uiError && <div style={R.errorBanner}>{uiError}</div>}
+
       {/* ── SIDEBAR ── */}
       <div style={R.sidebar}>
         <div style={R.sideScroll}>
@@ -195,8 +278,8 @@ const App = () => {
           <div style={R.brand}>
             <div style={R.brandIcon} />
             <div>
-              <div style={R.brandName}>PROENHANCE</div>
-              <div style={R.brandSub}>processing studio</div>
+              <div style={R.brandName}>AURORA ENTERPRISE</div>
+              <div style={R.brandSub}>image intelligence suite</div>
             </div>
           </div>
           <div style={R.sep} />
@@ -499,6 +582,7 @@ const App = () => {
 
         {!originalPath && (
           <div style={R.empty}>
+            <div style={R.emptyPill}>Ready for Intake</div>
             <svg
               width="56"
               height="56"
@@ -511,8 +595,11 @@ const App = () => {
               <circle cx="8.5" cy="8.5" r="1.5" />
               <path d="M21 15l-5-5L5 21" />
             </svg>
-            <div style={R.emptyTitle}>Open an image to begin</div>
-            <div style={R.emptyHint}>JPG / PNG / WebP / BMP / TIFF</div>
+            <div style={R.emptyTitle}>Upload an asset to start a processing workflow</div>
+            <div style={R.emptyHint}>Supports JPG, PNG, WebP, BMP and TIFF files up to 50MB</div>
+            <Btn onClick={handleOpen} primary style={{ marginTop: 14, width: 240 }}>
+              SELECT IMAGE ASSET
+            </Btn>
           </div>
         )}
 
@@ -629,7 +716,7 @@ function Btn({ children, onClick, disabled, accent, primary, full, style }) {
         borderRadius: 3,
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.4 : 1,
-        width: full || true ? '100%' : 'auto',
+        width: full ? '100%' : 'auto',
         transition: 'opacity 0.15s',
         ...style
       }}
@@ -684,14 +771,14 @@ function MC({ l, v, c }) {
 }
 
 const C = {
-  cyan: '#5eafd6',
-  amber: '#d4a344',
-  red: '#c44',
-  green: '#4a4',
-  dim: '#333',
-  bg: '#09090b',
-  sidebar: '#0b0b0e',
-  border: '#141418'
+  cyan: '#53a8ff',
+  amber: '#e7b35e',
+  red: '#ef6464',
+  green: '#59c48f',
+  dim: '#8792a2',
+  bg: '#0b1220',
+  sidebar: '#0f172a',
+  border: '#1e293b'
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -710,27 +797,29 @@ const R = {
     fontSize: 11
   },
   sidebar: {
-    width: 284,
-    minWidth: 284,
+    width: 340,
+    minWidth: 340,
     display: 'flex',
     flexDirection: 'column',
-    backgroundColor: C.sidebar,
-    borderRight: `1px solid ${C.border}`
+    background: 'linear-gradient(180deg,#0f172a 0%, #0b1220 100%)',
+    borderRight: `1px solid ${C.border}`,
+    paddingTop: 48
   },
-  sideScroll: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '12px 12px 6px' },
+  sideScroll: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '16px 14px 8px' },
 
-  brand: { display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0 10px' },
+  brand: { display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0 14px' },
   brandIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     flexShrink: 0,
-    background: `linear-gradient(135deg, ${C.cyan} 0%, #3a6080 100%)`
+    boxShadow: '0 8px 24px rgba(30,64,175,0.35)',
+    background: `linear-gradient(135deg, ${C.cyan} 0%, #1d4ed8 100%)`
   },
-  brandName: { fontSize: 12, fontWeight: 800, color: '#ccc', letterSpacing: '1.5px' },
-  brandSub: { fontSize: 8, color: '#2a2a2e', letterSpacing: '1.5px', textTransform: 'uppercase' },
+  brandName: { fontSize: 13, fontWeight: 800, color: '#dbeafe', letterSpacing: '1.2px' },
+  brandSub: { fontSize: 8, color: '#8aa1c7', letterSpacing: '1.3px', textTransform: 'uppercase' },
 
-  sep: { height: 1, backgroundColor: C.border, margin: '4px 0' },
+  sep: { height: 1, backgroundColor: C.border, margin: '8px 0' },
 
   ph: {
     display: 'flex',
@@ -867,11 +956,44 @@ const R = {
   canvas: {
     flex: 1,
     position: 'relative',
+    paddingTop: 48,
     overflow: 'hidden',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.bg
+    background: 'radial-gradient(circle at 30% 10%, #13203a 0%, #0b1220 45%, #090f1b 100%)'
+  },
+  topBar: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 48,
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0 18px',
+    borderBottom: `1px solid ${C.border}`,
+    color: '#d8e4ff',
+    fontSize: 12,
+    fontWeight: 700,
+    letterSpacing: '0.6px',
+    background: 'linear-gradient(90deg,#0f172a,#182a4a)'
+  },
+  topTitleWrap: { display: 'flex', flexDirection: 'column', gap: 2 },
+  topSubTitle: { fontSize: 9, color: '#94a3b8', fontWeight: 500, letterSpacing: '0.4px' },
+  topMeta: { fontSize: 10, color: '#bfdbfe', fontWeight: 700 },
+  errorBanner: {
+    position: 'fixed',
+    top: 48,
+    left: 0,
+    right: 0,
+    zIndex: 40,
+    padding: '10px 18px',
+    color: '#fecaca',
+    backgroundColor: 'rgba(127,29,29,0.35)',
+    borderBottom: '1px solid rgba(239,68,68,0.35)',
+    fontSize: 12
   },
   img: { position: 'absolute', width: '100%', height: '100%', objectFit: 'contain' },
 
@@ -897,9 +1019,26 @@ const R = {
   },
   busyText: { fontSize: 11, color: '#555', letterSpacing: '1px' },
 
-  empty: { textAlign: 'center' },
-  emptyTitle: { fontSize: 12, color: '#1a1a1e', marginTop: 14, letterSpacing: '0.5px' },
-  emptyHint: { fontSize: 9, color: '#141418', marginTop: 4 },
+  empty: { textAlign: 'center', maxWidth: 560, padding: 30 },
+  emptyPill: {
+    display: 'inline-block',
+    marginBottom: 14,
+    fontSize: 10,
+    padding: '4px 10px',
+    borderRadius: 999,
+    color: '#bfdbfe',
+    border: '1px solid rgba(147,197,253,0.35)',
+    backgroundColor: 'rgba(59,130,246,0.14)',
+    letterSpacing: '0.7px'
+  },
+  emptyTitle: {
+    fontSize: 20,
+    color: '#dbeafe',
+    marginTop: 14,
+    letterSpacing: '0.2px',
+    fontWeight: 700
+  },
+  emptyHint: { fontSize: 12, color: '#93a7c5', marginTop: 8 },
 
   canvasTag: {
     position: 'absolute',
