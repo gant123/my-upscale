@@ -262,6 +262,15 @@ export default function App() {
   const setA = useCallback((k, v) => setAdj((p) => ({ ...p, [k]: v })), [])
   const pipeline = useMemo(() => activeLayers.join(' → '), [activeLayers])
 
+// AI capability detection (REAL status, not fake READY)
+const aiCaps = useMemo(() => ({
+  upscale: !!caps.upscale_realesrgan,
+  face: !!caps.face_gfpgan || !!caps.face_codeformer,
+  bg: !!caps.bg_remove
+}), [caps])
+
+const anyAi = aiCaps.upscale || aiCaps.face || aiCaps.bg
+
   const status = useMemo(() => {
     if (!originalPath) return { label: 'Ready', tone: 'dim' }
     if (busy) return { label: busyMsg || 'Working', tone: 'amber' }
@@ -350,10 +359,21 @@ export default function App() {
      
             {tab === 'ai' && <div style={S.panelInner}>
               <PH title="✦ AI Tools" sub="Neural network processing" />
-              <AIBox title="✦ Auto Fix" desc="Analyze → correct → enhance → face → upscale"
-                ready={true} onClick={handleAutoEnhance}
-                dis={!originalPath || busy} accent />
-              <Sep />
+             <AIBox
+                  title="✦ Auto Fix"
+                  desc="Analyze → correct → enhance → face → upscale"
+                  ready={true}
+                  statusLabel={anyAi ? 'READY' : 'BASIC'}
+                  statusTone={anyAi ? 'on' : 'warn'}
+                  hint={
+                    !anyAi
+                      ? 'AI modules not installed — running in classic mode (no neural processing).'
+                      : null
+                  }
+                  onClick={handleAutoEnhance}
+                  dis={!originalPath || busy}
+                  accent
+                />
               <AIBox title="AI Upscale" desc="Real-ESRGAN 2×/4× neural detail synthesis"
                 ready={caps.upscale_realesrgan} hint={installHints.upscale_realesrgan}
                 packageKey="realesrgan" onInstall={handleInstall} installing={installing}
@@ -456,34 +476,63 @@ const Sl = ({ l, v, mn, mx, st = 1, f }) => {
   )
 }
 
-const AIBox = ({ title, desc, ready, hint, onClick, dis, children, accent, packageKey, onInstall, installing }) => (
-  <div style={{ ...S.aiBox, ...(ready ? {} : { opacity: 0.7 }) }}>
-    <div style={S.aiTop}>
-      <div>
-        <div style={S.aiT}>{title}</div>
-        <div style={S.aiD}>{desc}</div>
-      </div>
-      <span style={{ ...S.badge, ...(ready ? S.bOn : S.bOff) }}>
-        {ready ? 'READY' : 'INSTALL'}
-      </span>
-    </div>
-    {!ready && hint && <div style={S.aiH}>💡 {hint}</div>}
-    {!ready && packageKey && onInstall && (
-      <ABtn
-        onClick={() => onInstall(packageKey)}
-        disabled={installing === packageKey}
-      >
-        {installing === packageKey ? '⏳ Installing… please wait' : `⬇ Install ${title}`}
-      </ABtn>
-    )}
-    {ready && (children || (onClick && (
-      <ABtn onClick={onClick} disabled={dis}>
-        {accent ? title : `Run ${title}`}
-      </ABtn>
-    )))}
-  </div>
-)
+const AIBox = ({
+  title,
+  desc,
+  ready,
+  hint,
+  onClick,
+  dis,
+  children,
+  accent,
+  packageKey,
+  onInstall,
+  installing,
+  statusLabel,
+  statusTone
+}) => {
+  const badgeText = statusLabel || (ready ? 'READY' : 'INSTALL')
 
+  const badgeStyle =
+    statusTone === 'warn'
+      ? { ...S.badge, ...S.bWarn }
+      : ready
+      ? { ...S.badge, ...S.bOn }
+      : { ...S.badge, ...S.bOff }
+
+  return (
+    <div style={{ ...S.aiBox, ...(ready ? {} : { opacity: 0.82 }) }}>
+      <div style={S.aiTop}>
+        <div>
+          <div style={S.aiT}>{title}</div>
+          <div style={S.aiD}>{desc}</div>
+        </div>
+        <span style={badgeStyle}>{badgeText}</span>
+      </div>
+
+      {hint && <div style={S.aiH}>💡 {hint}</div>}
+
+      {!ready && packageKey && onInstall && (
+        <ABtn
+          onClick={() => onInstall(packageKey)}
+          disabled={installing === packageKey}
+        >
+          {installing === packageKey
+            ? '⏳ Installing… please wait'
+            : `⬇ Install ${packageKey}`}
+        </ABtn>
+      )}
+
+      {ready &&
+        (children ||
+          (onClick && (
+            <ABtn onClick={onClick} disabled={dis}>
+              {accent ? 'Run Auto Fix' : `Run ${title}`}
+            </ABtn>
+          )))}
+    </div>
+  )
+}
 const MC = ({ l, v, t }) => {
   const c = { dim: '#64748b', cyan: '#67e8f9', amber: '#fbbf24', green: '#4ade80', red: '#f87171' }[t] || '#64748b'
   return <div style={{ ...S.mc, borderColor: c + '33' }}><div style={S.mcL}>{l}</div><div style={{ ...S.mcV, color: c }}>{v}</div></div>
@@ -523,7 +572,10 @@ const B = '#60a5fa'
 
 const S = {
   app: { height: '100vh', background: '#070b14', color: '#e2e8f0', fontFamily: "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif", display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-
+bWarn: {
+  background: '#f59e0b',
+  color: '#000'
+},
   // Top bar
   topBar: { height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', borderBottom: `1px solid ${L}`, background: 'rgba(15,23,42,0.92)', backdropFilter: 'blur(8px)', WebkitAppRegion: 'drag' },
   topLeft: { display: 'flex', alignItems: 'center', gap: 10 },
