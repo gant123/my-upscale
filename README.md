@@ -6,95 +6,108 @@
 
 Aurora Ops is a desktop image processing application built with **Electron + React + Python**. It combines **Lightroom-style manual controls** with **neural network AI processing** to deliver professional-grade image enhancement.
 
-### Feature Comparison
+---
 
-| Feature | Aurora Ops | Topaz Photo AI | Google Photos | Photoshop |
-|---|---|---|---|---|
-| AI Upscaling (Real-ESRGAN) | ✅ | ✅ | ✅ | ✅ |
-| AI Face Restoration (GFPGAN) | ✅ | ✅ | ✅ | ✅ |
-| Background Removal | ✅ | ❌ | ✅ | ✅ |
-| AI Inpainting | ✅ | ❌ | ✅ | ✅ |
-| One-Click Auto Fix | ✅ | ✅ | ✅ | ❌ |
-| 15 Manual Sliders | ✅ | ❌ | ❌ | ✅ |
-| X-Ray Visualization (8 modes) | ✅ | ❌ | ❌ | ❌ |
-| Enhancement Layers (stackable) | ✅ | ❌ | ❌ | ✅ |
-| Before/After Compare | ✅ | ✅ | ✅ | ❌ |
-| Batch Processing | ✅ | ✅ | ❌ | ✅ |
-| Offline / Privacy | ✅ | ✅ | ❌ | ❌ |
-| Open Source | ✅ | ❌ | ❌ | ❌ |
-| **Price** | **Free** | $99/yr | $2.99/mo | $20/mo |
+## Quick Start (Recommended)
+
+### Requirements
+- Node.js 18+ (or 20 LTS)
+- **Python 3.11.x (recommended)**  
+  > Real-ESRGAN/Basicsr can fail on very new Python versions (3.13/3.14+). If AI deps fail, switch to Python 3.11.
 
 ---
 
-## Architecture
+### macOS setup (Homebrew)
 
-```
-┌─────────────────────────────────────────────────┐
-│ Electron Main Process (Node.js)                  │
-│  ├─ IPC handlers for each command                │
-│  ├─ File I/O, dialogs, validation                │
-│  └─ Spawns Python engine via stdin JSON          │
-├─────────────────────────────────────────────────┤
-│ Python Engine (engine.py)                        │
-│  ├─ Classical: 15 sliders, 5 enhance modes,      │
-│  │   8 x-ray modes, analysis, diagnostics        │
-│  ├─ AI: Real-ESRGAN, GFPGAN, rembg, inpaint     │
-│  ├─ Auto-enhance: analyze → fix → enhance →      │
-│  │   face restore → upscale (intelligent chain)   │
-│  └─ Capability detection (graceful degradation)   │
-├─────────────────────────────────────────────────┤
-│ React Renderer                                   │
-│  ├─ Adjust tab: live Lightroom sliders           │
-│  ├─ Enhance tab: stackable layer cards           │
-│  ├─ AI Tools tab: upscale, face, bg, inpaint     │
-│  ├─ Analyze tab: metrics + AI suggestions        │
-│  ├─ Export tab: save dialog                      │
-│  └─ Canvas: split compare, zoom, hold-to-compare │
-└─────────────────────────────────────────────────┘
+#### 1) Install Node + Python 3.11
+```bash
+brew install node
+brew install python@3.11
 ```
 
-**Key design decisions:**
-- **stdin JSON protocol** — No shell escaping issues. All Python communication goes through `echo JSON | python engine.py`
-- **Capability detection** — Engine reports what AI libs are installed. UI hides unavailable features and shows install hints
-- **Graceful degradation** — Classical features always work. AI features light up as you install libs
-- **Latest-wins debounce** — Live slider adjustments use sequence numbers to ignore stale responses
+Verify:
+```bash
+node -v
+python3.11 --version
+```
 
----
-
-## Quick Start
-
-### 1. Install Node dependencies
+#### 2) Install Node dependencies
 ```bash
 npm install
 ```
 
-### 2. Install Python AI dependencies
+#### 3) Create a Python venv (recommended) + install AI deps
+From the project root:
 ```bash
-# Core (required)
-pip install opencv-python-headless numpy Pillow
+python3.11 -m venv myenv
+source myenv/bin/activate
 
-# AI features (optional — install what you want)
-pip install realesrgan basicsr          # AI upscaling
-pip install gfpgan                       # Face restoration
-pip install rembg onnxruntime            # Background removal
-
-# Or run the setup script:
+# Install AI dependencies (recommended script)
 bash setup-ai.sh
 ```
 
-### 3. Run
+#### 4) Run the app
 ```bash
 npm run dev
 ```
 
-### GPU Acceleration (recommended for AI)
+---
+
+### Generic setup (Linux / Windows / other)
+
+#### 1) Install Node dependencies
 ```bash
-# NVIDIA GPU (CUDA)
+npm install
+```
+
+#### 2) Create a venv and install Python deps
+```bash
+python -m venv myenv
+# mac/linux:
+source myenv/bin/activate
+# windows (powershell):
+# .\myenv\Scripts\Activate.ps1
+
+bash setup-ai.sh
+```
+
+#### 3) Run
+```bash
+npm run dev
+```
+
+---
+
+## Python Dependencies (manual install)
+
+> If you don’t want the script, install by hand inside your virtualenv.
+
+```bash
+# Core (required)
+pip install -U pip setuptools wheel
+pip install opencv-python-headless numpy Pillow
+
+# AI features (optional)
+pip install realesrgan basicsr     # AI upscaling
+pip install gfpgan                 # Face restoration
+pip install rembg onnxruntime      # Background removal
+```
+
+**Important:** Avoid forcing wheels with `--only-binary :all:` unless you know your environment has matching wheels.
+
+---
+
+## GPU Acceleration (recommended for AI)
+
+### NVIDIA (CUDA)
+```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install onnxruntime-gpu
+```
 
-# Apple Silicon
-pip install torch torchvision  # MPS support auto-detected
+### Apple Silicon (MPS)
+```bash
+pip install torch torchvision
 ```
 
 ---
@@ -104,9 +117,9 @@ pip install torch torchvision  # MPS support auto-detected
 ### 🎛 Manual Adjust (15 Sliders)
 All Lightroom-style controls with real pixel math (not CSS filters):
 
-**Tone:** Exposure, Contrast, Highlights, Shadows, Whites, Blacks
-**Color:** Temperature, Tint, Vibrance, Saturation
-**Detail:** Clarity, Dehaze, Sharpness, Grain, Vignette
+**Tone:** Exposure, Contrast, Highlights, Shadows, Whites, Blacks  
+**Color:** Temperature, Tint, Vibrance, Saturation  
+**Detail:** Clarity, Dehaze, Sharpness, Grain, Vignette  
 
 Plus 8 X-Ray visualization modes with blend control.
 

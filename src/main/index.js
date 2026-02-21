@@ -397,27 +397,108 @@ app.whenReady().then(() => {
     const venv = venvPython()
     const pipBin = venv ? venv.replace(/python[23]?$/, 'pip') : 'pip3'
 
+    // Build pip args: upgrade pip/tools first, then install packages.
+    const upgradeArgs = ['install', '--upgrade', 'pip', 'setuptools', 'wheel']
+
+    // For packages that historically fail to build from source (basicsr), prefer binary wheels
+    const forceBinary = new Set(['basicsr'])
+    const installArgs = ['install']
+    for (const p of packages) {
+      installArgs.push(p)
+    }
+    if (packages.some((p) => forceBinary.has(p))) {
+      installArgs.push('--only-binary', ':all:')
+    }
+
     return new Promise((resolve) => {
-      const child = spawn(pipBin, ['install', ...packages], {
-        timeout: 300_000, // 5 min max for large packages
-      })
+      // Helper to spawn pip and collect output
+      const run = (args, cb) => {
+        const child = spawn(pipBin, args, { timeout: 300_000 })
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (d) => { stdout += d.toString() })
+        child.stderr.on('data', (d) => { stderr += d.toString() })
+        child.on('error', (err) => cb(err, null))
+        child.on('close', (code) => cb(null, { code, stdout, stderr }))
+      }
 
-      let stdout = ''
-      let stderr = ''
-
-      child.stdout.on('data', (d) => { stdout += d.toString() })
-      child.stderr.on('data', (d) => { stderr += d.toString() })
-
-      child.on('error', (err) => {
-        resolve({ error: `Failed to run pip: ${err.message}` })
-      })
-
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolve({ status: 'installed', package: packageName, output: stdout.slice(-500) })
-        } else {
-          resolve({ error: `pip install failed (code ${code}): ${stderr.slice(-500)}` })
+      // Step 1: ensure build tools are present
+      run(upgradeArgs, (err, res) => {
+        if (err) return resolve({ error: `Failed to run pip: ${err.message}` })
+        if (res.code !== 0) {
+          // Non-fatal: continue to install but surface a hint
+          // fallthrough to install
         }
+
+        // Step 2: attempt install with preferred binary flag when appropriate
+        run(installArgs, async (err2, res2) => {
+          if (err2) return resolve({ error: `Failed to run pip: ${err2.message}` })
+          if (res2.code === 0) {
+            // Refresh capabilities from engine if possible
+            try {
+              const caps = await callEngine({ command: 'capabilities' }, ENGINE_TIMEOUT_QUICK_MS)
+              return resolve({ status: 'installed', package: packageName, output: res2.stdout.slice(-500), capabilities: caps })
+            } catch (e) {
+              return resolve({ status: 'installed', package: packageName, output: res2.stdout.slice(-500) })
+            }
+          }
+
+          // Install failed — analyze stderr for common causes and attempt fallbacks
+          const stderr = res2.stderr || ''
+          const hint = {}
+
+          // If pip reports dependency resolution conflicts, try sequential installs and legacy resolver
+          const isResolutionError = /ResolutionImpossible/i.test(stderr)
+          if (isResolutionError) {
+            // Try installing packages one-by-one (preferring binary wheels for known bad-builds)
+            const runP = (args) => new Promise((rescb) => run(args, (err, r) => rescb({ err, r })))
+            let seqFailed = false
+            let seqOutput = ''
+            for (const p of packages) {
+              const argsP = ['install', p]
+              if (forceBinary.has(p)) argsP.push('--only-binary', ':all:')
+              /* eslint-disable no-await-in-loop */
+              const { err: e1, r: r1 } = await runP(argsP)
+              seqOutput += `\n=== ${p} (code=${r1?.code}) ===\n` + (r1?.stdout || '') + (r1?.stderr || '')
+              if (e1 || r1.code !== 0) seqFailed = true
+            }
+            if (!seqFailed) {
+              try {
+                const caps = await callEngine({ command: 'capabilities' }, ENGINE_TIMEOUT_QUICK_MS)
+                return resolve({ status: 'installed', package: packageName, output: seqOutput.slice(-500), capabilities: caps })
+              } catch (e) {
+                return resolve({ status: 'installed', package: packageName, output: seqOutput.slice(-500) })
+              }
+            }
+
+            // As a last resort try legacy resolver (less strict dependency solving)
+            const legacyArgs = ['install', ...packages, '--use-deprecated=legacy-resolver']
+            run(legacyArgs, (err3, res3) => {
+              if (err3) return resolve({ error: `Failed to run pip: ${err3.message}` })
+              if (res3.code === 0) {
+                try {
+                  callEngine({ command: 'capabilities' }, ENGINE_TIMEOUT_QUICK_MS).then((caps) => resolve({ status: 'installed', package: packageName, output: res3.stdout.slice(-500), capabilities: caps })).catch(() => resolve({ status: 'installed', package: packageName, output: res3.stdout.slice(-500) }))
+                } catch {
+                  return resolve({ status: 'installed', package: packageName, output: res3.stdout.slice(-500) })
+                }
+              } else {
+                hint.message = 'Dependency conflict detected. Try creating a fresh virtual environment and installing packages individually, or use a Python version compatible with these packages.'
+                return resolve({ error: `pip install failed (code ${res3.code}): ${(res3.stderr || '').slice(-1000)}`, hint })
+              }
+            })
+            return
+          }
+
+          if (/Failed to build/i.test(stderr) || /error: command 'x86_64-linux-gnu-gcc'|clang: error/i.test(stderr)) {
+            hint.message = 'Build tools missing. Install a C compiler and python dev headers (e.g. build-essential, Xcode command line tools)'
+          }
+          if (/KeyError: '__version__'/i.test(stderr) || /Failed to build 'basicsr'/i.test(stderr)) {
+            hint.message = 'basicsr failed to build. Try installing with binary wheels: pip install basicsr --only-binary :all:'
+          }
+          if (!hint.message) hint.message = 'pip install failed. See pip output for details.'
+
+          return resolve({ error: `pip install failed (code ${res2.code}): ${stderr.slice(-1000)}`, hint })
+        })
       })
     })
   })

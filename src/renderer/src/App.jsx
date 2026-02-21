@@ -140,6 +140,10 @@ export default function App() {
       const r = await window.api.installPackage(packageKey)
       if (r?.error) {
         pushToast('error', 'Install failed', r.error)
+        if (r.hint?.message) {
+          const uiKey = ({ realesrgan: 'upscale_realesrgan', gfpgan: 'face_gfpgan', rembg: 'bg_remove' })[packageKey] || packageKey
+          setInstallHints((p) => ({ ...p, [uiKey]: r.hint.message }))
+        }
       } else {
         pushToast('ok', 'Installed!', `${packageKey} is ready`)
         // Refresh capabilities so badges update
@@ -147,6 +151,10 @@ export default function App() {
         if (c?.capabilities) {
           setCaps(c.capabilities)
           setInstallHints(c.install_hints || {})
+        } else {
+          // clear any previous hint for this package
+          const uiKey = ({ realesrgan: 'upscale_realesrgan', gfpgan: 'face_gfpgan', rembg: 'bg_remove' })[packageKey] || packageKey
+          setInstallHints((p) => { const n = { ...p }; delete n[uiKey]; return n })
         }
       }
     } catch (e) {
