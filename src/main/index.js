@@ -1,10 +1,11 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.png?asset'
-import { spawn } from 'child_process'
+import { BrowserWindow, app, dialog, ipcMain, shell } from 'electron'
+import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+
 import fs from 'fs'
+import icon from '../../resources/icon.png?asset'
+import { join } from 'path'
 import path from 'path'
+import { spawn } from 'child_process'
 
 // ─── Constants ───
 const ALLOWED_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff'])
@@ -68,6 +69,8 @@ function sanitizeAdjustParams(params = {}) {
 
 function venvPython() {
   const candidates = [
+    join(app.getAppPath(), 'myenv', 'bin', 'python'),
+    join(process.cwd(), 'myenv', 'bin', 'python'),
     join(app.getAppPath(), '.venv', 'bin', 'python'),
     join(process.cwd(), '.venv', 'bin', 'python'),
   ]
@@ -150,7 +153,17 @@ function callEngine(command, timeoutMs = ENGINE_TIMEOUT_MS) {
   }
   return chain.then((result) => {
     if (result?.spawnError) {
-      return { error: 'Python not found. Install Python 3.9+ and opencv-python.' }
+      const mainWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]
+      if (mainWindow) {
+        dialog.showErrorBox(
+          'Virtual Environment Not Found',
+          'The "myenv" virtual environment is missing.\n\n' +
+          'Please run: python3 -m venv myenv\n' +
+          'Then run: source myenv/bin/activate && pip install opencv-python numpy\n\n' +
+          'The app will restart after setup.'
+        )
+      }
+      return { error: 'Python not found. Create venv: python3 -m venv myenv && source myenv/bin/activate && pip install opencv-python numpy' }
     }
     return result
   })

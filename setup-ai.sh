@@ -11,6 +11,10 @@ echo "║  Aurora Ops — AI Module Installer         ║"
 echo "╚═══════════════════════════════════════════╝"
 echo ""
 
+# Upgrade pip and install build tools
+echo "→ Upgrading pip and installing build tools..."
+pip install --upgrade pip setuptools wheel --quiet
+
 # Core (always required)
 echo "→ Installing core dependencies (opencv, numpy)..."
 pip install opencv-python-headless numpy Pillow --quiet
@@ -18,8 +22,8 @@ pip install opencv-python-headless numpy Pillow --quiet
 # AI Upscaling
 echo ""
 echo "→ Installing Real-ESRGAN (AI Upscaling)..."
-pip install realesrgan basicsr --quiet 2>/dev/null || {
-  echo "  ⚠ realesrgan install failed. Try: pip install realesrgan basicsr"
+pip install realesrgan basicsr --only-binary :all: --quiet 2>/dev/null || {
+  echo "  ⚠ realesrgan install failed. Try: pip install realesrgan basicsr --only-binary :all:"
   echo "  GPU users: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121"
 }
 
