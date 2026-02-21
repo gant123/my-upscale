@@ -71,6 +71,8 @@ function venvPython() {
   const candidates = [
     join(app.getAppPath(), 'myenv', 'bin', 'python'),
     join(process.cwd(), 'myenv', 'bin', 'python'),
+    join(app.getAppPath(), 'myenv', 'Scripts', 'python.exe'), // Added Windows support
+    join(process.cwd(), 'myenv', 'Scripts', 'python.exe'),    // Added Windows support
     join(app.getAppPath(), '.venv', 'bin', 'python'),
     join(process.cwd(), '.venv', 'bin', 'python'),
   ]
@@ -120,16 +122,21 @@ function callEngine(command, timeoutMs = ENGINE_TIMEOUT_MS) {
         clearTimeout(timer)
         finish({ spawnError: error })
       })
-      child.on('close', (code) => {
-        clearTimeout(timer)
+   child.on('close', (code) => {
+        clearTimeout(timer) // This is the correct timer for the engine call
+        
         if (code !== 0 && !stdout.includes('{')) {
           return finish({ error: stderr || `Engine exited with code ${code}` })
         }
         try {
-          const s = stdout.indexOf('{')
-          const e = stdout.lastIndexOf('}')
-          if (s === -1 || e === -1) throw new Error('No JSON')
-          finish(JSON.parse(stdout.substring(s, e + 1)))
+          // Find the FIRST '{' and LAST '}' to capture the entire JSON object
+          const firstBrace = stdout.indexOf('{')
+          const lastBrace = stdout.lastIndexOf('}')
+          
+          if (firstBrace === -1 || lastBrace === -1) throw new Error('No JSON found in engine output')
+          
+          const cleanJson = stdout.substring(firstBrace, lastBrace + 1)
+          finish(JSON.parse(cleanJson))
         } catch {
           console.error('Engine raw output:', stdout, 'stderr:', stderr)
           finish({ error: 'Failed to parse engine output' })
@@ -168,6 +175,7 @@ function callEngine(command, timeoutMs = ENGINE_TIMEOUT_MS) {
     return result
   })
 }
+
 // ─── Preload Resolution ───
 function preloadPath() {
   const candidates = [
@@ -294,11 +302,11 @@ app.whenReady().then(() => {
     return result
   })
 
-  // ── AI Upscale ──
-  ipcMain.handle('upscale-image', async (_e, imagePath, scale = 4) => {
+  // ── AI Upscale ── (Updated to support model parameter)
+  ipcMain.handle('upscale-image', async (_e, imagePath, scale = 4, model = 'realesrgan') => {
     if (!isValidImagePath(imagePath)) return { error: 'Invalid image path or file type' }
     const s = [2, 4].includes(Number(scale)) ? Number(scale) : 4
-    const result = await callEngine({ command: 'upscale', image: imagePath, scale: s })
+    const result = await callEngine({ command: 'upscale', image: imagePath, scale: s, model: model })
     if (result.temp_path) result.preview = toBase64(result.temp_path)
     return result
   })
@@ -419,6 +427,8 @@ app.whenReady().then(() => {
         child.stdout.on('data', (d) => { stdout += d.toString() })
         child.stderr.on('data', (d) => { stderr += d.toString() })
         child.on('error', (err) => cb(err, null))
+        
+        // This MUST NOT have the clearTimeout logic
         child.on('close', (code) => cb(null, { code, stdout, stderr }))
       }
 

@@ -180,7 +180,27 @@ npm run build:linux
 ```
 
 Bundle the `python/` directory with the app, or require users to have Python installed.
+## Custom AI Models (Nomos2 & LaMa)
 
+Certain models must be downloaded manually and placed in a hidden system directory:
+**`~/.aurora/models/`** (Mac/Linux) or **`C:\Users\YourName\.aurora\models\`** (Windows).
+
+* **Nomos2:** Download a Nomos2 `.pth` file (from OpenModelDB), rename it to `Nomos2.pth`, and place it in the `.aurora/models/` folder.
+* **LaMa (Inpainting):** Download `big-lama.pt` from the official Sanster repository and place it in the `.aurora/models/` folder.
+* **GFPGAN:** The `GFPGANv1.4.pth` file should be placed directly in the **project root folder**.
+## Known Issues & Troubleshooting
+
+### PyTorch / basicsr Crash (`ModuleNotFoundError: No module named 'torchvision.transforms.functional_tensor'`)
+Newer versions of `torchvision` completely removed the `functional_tensor` file, which completely breaks the `basicsr` library used for Real-ESRGAN. 
+
+**The Fix:**
+You must manually patch the `basicsr` library inside your virtual environment:
+1. Navigate to: `myenv/lib/python3.11/site-packages/basicsr/data/degradations.py`
+2. Open the file and find line 8: 
+   `from torchvision.transforms.functional_tensor import rgb_to_grayscale`
+3. Change it to: 
+   `from torchvision.transforms.functional import rgb_to_grayscale`
+4. Save the file. The engine will now boot correctly.
 ---
 
 ## Roadmap

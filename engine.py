@@ -130,7 +130,7 @@ def _probe_lama():
     except Exception as e:
         return _cap_fail("inpaint_lama", f"torch missing: {e}")
 
-    model_path = os.path.join(os.path.expanduser("~"), ".aurora", "models", "big-lama.pt")
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "big-lama.pt")
     if os.path.exists(model_path):
         return _cap_ok("inpaint_lama")
     return _cap_fail("inpaint_lama", f"model not found: {model_path}")
@@ -542,47 +542,89 @@ def cmd_enhance(data):
 # ============================================================================
 
 def cmd_upscale(data):
-    if not CAPS["upscale_realesrgan"]:
-        return {
-            "error": "Real-ESRGAN not installed/usable. Run: pip install realesrgan basicsr",
-            "missing": "realesrgan",
-            "details": CAP_DETAILS["errors"].get("upscale_realesrgan"),
-        }
-
-    from basicsr.archs.rrdbnet_arch import RRDBNet
-    from realesrgan import RealESRGANer
-
+    model_type = data.get("model", "realesrgan")
     img = load(data["image"])
     scale = int(data.get("scale", 4))
     scale = 2 if scale == 2 else 4
 
-    # Model selection
-    if scale == 2:
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+    # ─── NOMOS2 (.pth) LOGIC ───
+    if model_type == "nomos2":
+        try:
+            import torch
+            from spandrel import ModelLoader
+            
+            # Look for the model in ~/.aurora/models/ (Standard Linux/Unix hidden app data)
+            model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "Nomos2.pth")
+            
+            if not os.path.exists(model_path):
+                return {"error": f"Nomos2 model not found at {model_path}"}
+
+            # Spandrel auto-detects the architecture from the .pth file
+            model = ModelLoader().load_from_file(model_path).eval()
+            
+            # Use GPU if available
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model = model.to(device)
+
+            # Convert OpenCV BGR image to PyTorch RGB Tensor (BCHW format)
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_t = torch.from_numpy(img_rgb).float() / 255.0
+            img_t = img_t.permute(2, 0, 1).unsqueeze(0).to(device)
+
+            # Run inference
+            with torch.no_grad():
+                output_t = model(img_t)
+
+            # Convert back to OpenCV BGR numpy array
+            output_t = output_t.squeeze(0).permute(1, 2, 0).cpu().numpy()
+            output = (np.clip(output_t, 0, 1) * 255.0).astype(np.uint8)
+            output = cv2.cvtColor(output, cv2.COLOR_RGB2BGR)
+
+            result = save_temp(output, data["image"], f"upscaled_nomos2")
+            h, w = output.shape[:2]
+            result["output_size"] = {"width": w, "height": h}
+            result["scale"] = scale
+            result["model"] = "nomos2"
+            return result
+
+        except Exception as e:
+            return {"error": f"Nomos2 Upscale failed: {str(e)}"}
+
+    # ─── REAL-ESRGAN LOGIC ───
     else:
-        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+        if not CAPS.get("upscale_realesrgan"):
+            return {
+                "error": "Real-ESRGAN not installed/usable. Run: pip install realesrgan basicsr",
+                "missing": "realesrgan",
+                "details": CAP_DETAILS["errors"].get("upscale_realesrgan"),
+            }
 
-    # NOTE: RealESRGANer can work with model_path=None in some builds, but not all.
-    # If your build requires weights, we’ll surface a clear error.
-    try:
-        upsampler = RealESRGANer(
-            scale=scale,
-            model_path=None,
-            model=model,
-            tile=400,
-            tile_pad=10,
-            pre_pad=0,
-            half=False,
-        )
-        output, _ = upsampler.enhance(img, outscale=scale)
-        result = save_temp(output, data["image"], f"upscaled_{scale}x")
-        h, w = output.shape[:2]
-        result["output_size"] = {"width": w, "height": h}
-        result["scale"] = scale
-        return result
-    except Exception as e:
-        return {"error": f"Upscale failed: {e}"}
+        from basicsr.archs.rrdbnet_arch import RRDBNet
+        from realesrgan import RealESRGANer
 
+        if scale == 2:
+            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+        else:
+            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+
+        try:
+            upsampler = RealESRGANer(
+                scale=scale,
+                model_path=None,
+                model=model,
+                tile=400,
+                tile_pad=10,
+                pre_pad=0,
+                half=False,
+            )
+            output, _ = upsampler.enhance(img, outscale=scale)
+            result = save_temp(output, data["image"], f"upscaled_{scale}x")
+            h, w = output.shape[:2]
+            result["output_size"] = {"width": w, "height": h}
+            result["scale"] = scale
+            return result
+        except Exception as e:
+            return {"error": f"Upscale failed: {e}"}
 # ============================================================================
 #  AI FACE RESTORATION — GFPGAN / CodeFormer
 # ============================================================================
@@ -645,7 +687,7 @@ def cmd_face_restore(data):
         from gfpgan import GFPGANer
 
         restorer = GFPGANer(
-            model_path="GFPGANv1.4.pth",
+            model_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "GFPGANv1.4.pth"),
             upscale=2,
             arch="clean",
             channel_multiplier=2,

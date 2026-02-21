@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+
 import { electronAPI } from '@electron-toolkit/preload'
 
 console.log('[preload] Aurora Ops v2 booted ✅')
@@ -18,7 +19,7 @@ const api = {
   enhanceImage: (imagePath, modes) => ipcRenderer.invoke('enhance-image', imagePath, modes),
 
   // AI Features
-  upscaleImage: (imagePath, scale) => ipcRenderer.invoke('upscale-image', imagePath, scale),
+  upscaleImage: (imagePath, scale, model) => ipcRenderer.invoke('upscale-image', imagePath, scale, model),
   faceRestore: (imagePath, model, fidelity) => ipcRenderer.invoke('face-restore', imagePath, model, fidelity),
   bgRemove: (imagePath, bgColor) => ipcRenderer.invoke('bg-remove', imagePath, bgColor),
   inpaint: (imagePath, maskPath, method) => ipcRenderer.invoke('inpaint', imagePath, maskPath, method),

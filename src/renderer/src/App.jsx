@@ -165,10 +165,16 @@ export default function App() {
     }
   }, [originalPath, runCommand, pushToast])
 
-  const handleUpscale = useCallback(async (scale = 4) => {
+
+  const handleUpscale = useCallback(async (scale = 4, model = 'realesrgan') => {
     const src = tempPath || originalPath; if (!src) return
-    const r = await runCommand('Upscaling ' + scale + '×', () => window.api.upscaleImage(src, scale))
-    if (r?.temp_path) { setTempPath(r.temp_path); setResultPreview(r.preview); setResultLabel('Upscaled ' + scale + '×'); pushToast('ok', 'Upscaled', (r.output_size?.width || '') + '×' + (r.output_size?.height || '')) }
+    const r = await runCommand(`Upscaling ${scale}× (${model})`, () => window.api.upscaleImage(src, scale, model))
+    if (r?.temp_path) { 
+        setTempPath(r.temp_path); 
+        setResultPreview(r.preview); 
+        setResultLabel(`Upscaled ${scale}×`); 
+        pushToast('ok', 'Upscaled', (r.output_size?.width || '') + '×' + (r.output_size?.height || '')) 
+    }
   }, [tempPath, originalPath, runCommand, pushToast])
 
   const handleFaceRestore = useCallback(async () => {
@@ -325,16 +331,17 @@ export default function App() {
                 hint={!anyAi && capsLoaded ? 'No AI packages — runs classical processing. Install below for neural enhancement.' : null}
                 onClick={handleAutoEnhance} disabled={!originalPath || busy} accent />
 
-              <AIBox title="AI Upscale" desc="Real-ESRGAN 2×/4× neural detail synthesis"
+         
+              <AIBox title="AI Upscale" desc="Neural detail synthesis"
                 status={aiCaps.upscale ? 'ready' : capsLoaded ? 'missing' : 'loading'}
                 hint={installHints.upscale_realesrgan} packageKey={!aiCaps.upscale ? 'realesrgan' : null}
                 onInstall={handleInstall} installing={installing}>
                 {aiCaps.upscale && <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <GBtn onClick={() => handleUpscale(2)} disabled={!originalPath || busy}>2×</GBtn>
-                  <ABtn onClick={() => handleUpscale(4)} disabled={!originalPath || busy}>4×</ABtn>
+                  <GBtn onClick={() => handleUpscale(2, 'realesrgan')} disabled={!originalPath || busy}>ESRGAN 2×</GBtn>
+                  <ABtn onClick={() => handleUpscale(4, 'realesrgan')} disabled={!originalPath || busy}>ESRGAN 4×</ABtn>
+                  <ABtn onClick={() => handleUpscale(4, 'nomos2')} disabled={!originalPath || busy} style={{borderColor: '#a855f7', color: '#d8b4fe', background: 'rgba(168,85,247,0.16)'}}>Nomos2 4×</ABtn>
                 </div>}
               </AIBox>
-
               <AIBox title="Face Restore" desc="GFPGAN: fix blurry/damaged faces"
                 status={aiCaps.face ? 'ready' : capsLoaded ? 'missing' : 'loading'}
                 hint={installHints.face_gfpgan} packageKey={!aiCaps.face ? 'gfpgan' : null}
@@ -423,6 +430,7 @@ const AIBox = ({ title, desc, status, hint, onClick, disabled, children, accent,
   const b = bMap[status] || bMap.missing
   const usable = status === 'ready' || status === 'basic'
   const showInstall = status === 'missing' && packageKey && onInstall
+  console.log('AIBox', title, 'status:', status, 'usable:', usable, 'showInstall:', showInstall )
   return (
     <div style={{ ...S.aiBox, opacity: status === 'soon' ? 0.5 : 1 }}>
       <div style={S.aiTop}>

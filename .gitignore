@@ -6,3 +6,5 @@ out
 *.log*
 .myenv
 myenv
+models*.pth
+gfpgan/weights/
